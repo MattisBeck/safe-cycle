@@ -1,0 +1,1 @@
+"""Bildverarbeitung, Fahrzeugerkennung und Objektverfolgung."""
