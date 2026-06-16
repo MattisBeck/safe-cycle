@@ -4,7 +4,7 @@ from dataclasses import asdict
 
 import pytest
 
-from shared.data_models import GpsPayload, ImuPayload, RadarPayload, TofPayload
+from shared.data_models import GpsPayload, ImuPayload, RadarPayload, TofPayload, VisionPayload
 
 
 @pytest.mark.parametrize("is_valid", [True, False])
@@ -65,6 +65,21 @@ def test_imu_payload_is_json_compatible() -> None:
         accel_x=0.1,
         accel_y=-0.2,
         accel_z=9.81,
+    )
+
+    serialized = json.loads(json.dumps(asdict(payload)))
+
+    assert serialized == asdict(payload)
+
+
+def test_vision_payload_is_json_compatible() -> None:
+    """Prüft die Ergebnisse der Fahrzeugerkennung auf JSON-Kompatibilität."""
+    payload = VisionPayload(
+        timestamp_ms=1_717_618_000_000,
+        found_vehicle=True,
+        detected_types=["Car", "Truck"],
+        vehicle_count=2,
+        inference_time_ms=12.5,
     )
 
     serialized = json.loads(json.dumps(asdict(payload)))
