@@ -1,0 +1,18 @@
+services:
+  mqtt:
+    image: eclipse-mosquitto:2
+    container_name: mqtt
+    ports:
+      - "127.0.0.1:1883:1883"
+    volumes:
+      - ./docker/mosquitto/config:/mosquitto/config:ro
+      - mqtt-data:/mosquitto/data
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  mqtt-data:
