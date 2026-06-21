@@ -17,7 +17,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.13"
+          python-version: "3.12"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
@@ -35,3 +35,43 @@ jobs:
 
       - name: Run tests
         run: uv run pytest
+
+  mqtt:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Validate Docker Compose configuration
+        run: docker compose config --quiet
+
+      - name: Start MQTT broker
+        run: docker compose up -d
+
+      - name: Test MQTT publish and subscribe
+        run: |
+          docker compose exec -T mqtt sh -ec '
+            attempt=0
+            until mosquitto_pub -h localhost -t safe-cycle/ci/ready -m ready; do
+              attempt=$((attempt + 1))
+              [ "$attempt" -lt 10 ] || exit 1
+              sleep 1
+            done
+
+            mosquitto_sub -h localhost -t safe-cycle/ci/test -C 1 -W 10 \
+              > /tmp/mqtt-message &
+            subscriber_pid=$!
+            sleep 1
+            mosquitto_pub -h localhost -t safe-cycle/ci/test -m connected
+            wait "$subscriber_pid"
+            grep -qx connected /tmp/mqtt-message
+          '
+
+      - name: Show MQTT logs on failure
+        if: failure()
+        run: docker compose logs mqtt
+
+      - name: Stop MQTT broker
+        if: always()
+        run: docker compose down --volumes
