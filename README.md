@@ -46,12 +46,18 @@ safe-cycle/
 
 ## Setup
 
-Voraussetzung sind eine unterstützte Python-Version und
-[`uv`](https://docs.astral.sh/uv/). Die Entwicklungsumgebung und alle
-Abhängigkeiten werden aus der Projektkonfiguration installiert:
+Voraussetzung sind [`uv`](https://docs.astral.sh/uv/) sowie Docker mit Docker Compose. Die
+Entwicklungsumgebung und alle Abhängigkeiten werden aus der Projektkonfiguration
+installiert:
 
 ```bash
 uv sync
+```
+
+Der MQTT-Broker wird anschließend mit Docker Compose gestartet:
+
+```bash
+docker compose up -d
 ```
 
 ## Tests

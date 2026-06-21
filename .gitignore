@@ -226,6 +226,8 @@ __marimo__/
 /data/
 /logs/
 /images/violations/
+/docker/mosquitto/data/
+/docker/mosquitto/log/
 
 # Local model weights
 /src/vision/models/*
