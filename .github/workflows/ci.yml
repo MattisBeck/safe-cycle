@@ -43,13 +43,31 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
       - name: Validate Docker Compose configuration
         run: docker compose config --quiet
 
       - name: Start MQTT broker
         run: docker compose up -d
 
-      - name: Test MQTT publish and subscribe
+      - name: Test MQTT wrapper publish and subscribe
+        env:
+          SAFE_CYCLE_MQTT_INTEGRATION: "1"
+        run: uv run pytest tests/shared/test_mqtt_client_integration.py
+
+      - name: Test MQTT broker publish and subscribe
         run: |
           docker compose exec -T mqtt sh -ec '
             attempt=0
