@@ -3,8 +3,8 @@
 from dataclasses import is_dataclass
 from typing import Final
 
-from shared.data_models import GpsPayload, ImuPayload, RadarPayload, TofPayload, VisionPayload
-from shared.mqtt_topics import TOPIC_PAYLOAD_TYPES, PayloadType
+from shared.data_models import GpsPayload, ImuPayload, PayloadType, RadarPayload, TofPayload, VisionPayload
+from shared.mqtt_topics import TOPIC_PAYLOAD_TYPES
 
 EXPECTED_TOPIC_PAYLOAD_TYPES: Final[dict[str, PayloadType]] = {
     "sensors/radar": RadarPayload,

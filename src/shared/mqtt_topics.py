@@ -1,16 +1,6 @@
-"""Gemeinsame MQTT-Topics und zugehörige Payload-Typen."""
+"""Gemeinsame MQTT-Topics und zugehörige Payload-Modelle."""
 
-from typing import TypeAlias
-
-from shared.data_models import GpsPayload, ImuPayload, RadarPayload, TofPayload, VisionPayload
-
-PayloadType: TypeAlias = (
-    type[GpsPayload]
-    | type[ImuPayload]
-    | type[RadarPayload]
-    | type[TofPayload]
-    | type[VisionPayload]
-)
+from shared.data_models import GpsPayload, ImuPayload, PayloadType, RadarPayload, TofPayload, VisionPayload
 
 TOPIC_PAYLOAD_TYPES: dict[str, PayloadType] = {
     "sensors/radar": RadarPayload,

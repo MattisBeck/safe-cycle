@@ -4,7 +4,28 @@ from dataclasses import asdict
 
 import pytest
 
-from shared.data_models import GpsPayload, ImuPayload, RadarPayload, TofPayload, VisionPayload
+from shared.data_models import GpsPayload, ImuPayload, RadarPayload, TimestampedPayload, TofPayload, VisionPayload
+
+
+def test_payloads_share_timestamp_base_class() -> None:
+    """Prüft, dass alle Payloads den gemeinsamen Zeitstempel-Vertrag erfüllen."""
+    payloads = [
+        TofPayload(timestamp_ms=1, distance_cm=85.5, is_valid=True),
+        RadarPayload(timestamp_ms=1, distance_cm=420.0, rel_speed_kmh=18.5, is_valid=True),
+        GpsPayload(timestamp_ms=1, latitude=51.3127, longitude=9.4924, speed_kmh=22.1, satellites_connected=12),
+        ImuPayload(timestamp_ms=1, accel_x=0.1, accel_y=-0.2, accel_z=9.81),
+        VisionPayload(
+            timestamp_ms=1,
+            found_vehicle=True,
+            detected_types=["Car"],
+            vehicle_count=1,
+            inference_time_ms=12.5,
+        ),
+    ]
+
+    for payload in payloads:
+        assert isinstance(payload, TimestampedPayload)
+        assert asdict(payload)["timestamp_ms"] == 1
 
 
 @pytest.mark.parametrize("is_valid", [True, False])
