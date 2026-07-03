@@ -98,6 +98,18 @@ def test_wrapper_connects_client_and_starts_loop(monkeypatch: pytest.MonkeyPatch
     assert client.on_message == wrapper._on_message
 
 
+def test_wrapper_uses_config_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Prüft den parameterlosen Verbindungsaufbau mit festen Defaults."""
+    FakeMqttClient.last_instance = None
+    monkeypatch.setattr(mqtt, "Client", FakeMqttClient)
+
+    MQTTWrapper()
+
+    client = FakeMqttClient.last_instance
+    assert client is not None
+    assert client.connected_to == ("127.0.0.1", 1883)
+
+
 def test_publish_serializes_payload_as_json(monkeypatch: pytest.MonkeyPatch) -> None:
     """Prüft, dass `publish()` Dataclasses als JSON an Paho weitergibt."""
     wrapper, client = create_wrapper_with_fake_client(monkeypatch)

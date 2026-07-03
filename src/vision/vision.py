@@ -1,5 +1,6 @@
 """Dieses Modul stellt Funktionen zur Objekterkennung für das Projekt bereit."""
 
+import threading
 import time
 from pathlib import Path
 
@@ -7,10 +8,13 @@ import cv2
 import numpy as np
 from ultralytics import YOLO  # type: ignore[attr-defined]
 
+from shared.config import CAMERA_PIPELINE
 from shared.data_models import VisionPayload
+from shared.mqtt_client import MQTTWrapper
 
 BASE_DIR = Path(__file__).resolve().parent
 MODEL_PATH = BASE_DIR / "models" / "yolo11s.pt"
+VISION_TOPIC = "vision/vehicles"
 
 VEHICLE_CLASSES = {
     2: "Car",
@@ -18,6 +22,19 @@ VEHICLE_CLASSES = {
     5: "Bus",
     7: "Truck",
 }
+
+
+def open_camera_capture(pipeline: str = CAMERA_PIPELINE) -> cv2.VideoCapture:
+    """Öffnet die Radxa-Kamera über die konfigurierte GStreamer-Pipeline.
+
+    :param pipeline: GStreamer-Pipeline für OpenCV.
+    :return: Geöffnete OpenCV-Capture.
+    :raises RuntimeError: Wenn die Kamera nicht geöffnet werden kann.
+    """
+    capture = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+    if not capture.isOpened():
+        raise RuntimeError("Kamera-Pipeline konnte nicht geöffnet werden.")
+    return capture
 
 
 def detect_vehicles(image_source: np.ndarray, model: YOLO) -> VisionPayload:
@@ -52,6 +69,29 @@ def detect_vehicles(image_source: np.ndarray, model: YOLO) -> VisionPayload:
     )
 
 
+def run_live_vision(
+    stop_event: threading.Event | None = None,
+) -> None:
+    """Startet Live-Kamera, YOLO-Erkennung und MQTT-Versand.
+
+    :param stop_event: Optionales Stoppsignal für Tests oder eingebettete Starts.
+    """
+    capture = open_camera_capture()
+    try:
+        model = YOLO(MODEL_PATH)
+        mqtt_wrapper = MQTTWrapper()
+
+        while stop_event is None or not stop_event.is_set():
+            has_frame, frame = capture.read()
+            if not has_frame:
+                break
+
+            payload = detect_vehicles(frame, model)
+            mqtt_wrapper.publish(VISION_TOPIC, payload)
+    finally:
+        capture.release()
+
+
 def run_example_detection(image_directory_path: Path) -> None:
     """Führt die Fahrzeugerkennung für lokale Beispielbilder aus.
 
@@ -75,4 +115,4 @@ def run_example_detection(image_directory_path: Path) -> None:
 
 
 if __name__ == "__main__":
-    run_example_detection(BASE_DIR.parent.parent / ".local" / "test_images")
+    run_live_vision()
