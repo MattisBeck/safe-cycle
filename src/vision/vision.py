@@ -16,6 +16,7 @@ from shared.mqtt_client import MQTTWrapper
 BASE_DIR = Path(__file__).resolve().parent
 MODEL_PATH = BASE_DIR / "models" / "yolo11s.pt"
 VISION_TOPIC = "vision/vehicles"
+VIDEO_FEED_WINDOW_NAME = "Safe Cycle Live Vision"
 
 VEHICLE_CLASSES = {
     2: "Car",
@@ -48,7 +49,6 @@ def detect_vehicles(image_source: np.ndarray[Any, Any], model: YOLO) -> VisionPa
     # Inference mit dem bereits geladenen Modell ausführen.
     results = model(image_source, verbose=False)
     first_result = results[0]
-
     # Erkannte Klassen-IDs aus dem ersten Ergebnis herauslesen.
     detected_ids = first_result.boxes.cls.int().tolist()
 
@@ -72,13 +72,20 @@ def detect_vehicles(image_source: np.ndarray[Any, Any], model: YOLO) -> VisionPa
 
 def run_live_vision(
     stop_event: threading.Event | None = None,
+    show_video_feed: bool = False,
 ) -> None:
     """Startet Live-Kamera, YOLO-Erkennung und MQTT-Versand.
 
     :param stop_event: Optionales Stoppsignal für Tests oder eingebettete Starts.
+    :param show_video_feed: Zeigt den Live-Feed in einem temporären OpenCV-Fenster.
     """
     capture = open_camera_capture()
+    window_created = False
     try:
+        if show_video_feed:
+            cv2.namedWindow(VIDEO_FEED_WINDOW_NAME, cv2.WINDOW_NORMAL)
+            window_created = True
+
         model = YOLO(MODEL_PATH)
         mqtt_wrapper = MQTTWrapper()
 
@@ -87,10 +94,17 @@ def run_live_vision(
             if not has_frame:
                 break
 
+            if show_video_feed:
+                cv2.imshow(VIDEO_FEED_WINDOW_NAME, frame)
+                if cv2.waitKey(1) & 0xFF == ord("q"):
+                    break
+
             payload = detect_vehicles(frame, model)
             mqtt_wrapper.publish(VISION_TOPIC, payload)
     finally:
         capture.release()
+        if window_created:
+            cv2.destroyWindow(VIDEO_FEED_WINDOW_NAME)
 
 
 def run_example_detection(image_directory_path: Path) -> None:
@@ -116,4 +130,4 @@ def run_example_detection(image_directory_path: Path) -> None:
 
 
 if __name__ == "__main__":
-    run_live_vision()
+    run_live_vision(show_video_feed=True)

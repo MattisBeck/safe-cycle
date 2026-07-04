@@ -9,7 +9,7 @@ Safe Cycle öffnet die Kamera nicht direkt, sondern über eine
 GStreamer-Pipeline:
 
 ```text
-libcamerasrc ! videoconvert ! video/x-raw,format=BGR ! appsink
+libcamerasrc ! video/x-raw,width=640,height=640 ! videoconvert ! video/x-raw,format=BGR,width=640,height=640 ! appsink
 ```
 
 Dafür müssen drei Dinge gleichzeitig stimmen:

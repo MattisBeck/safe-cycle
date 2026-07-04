@@ -251,6 +251,38 @@ def test_run_live_vision_releases_capture_when_publish_fails(monkeypatch: pytest
     assert capture.released is True
 
 
+def test_run_live_vision_shows_video_feed_until_q(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Prüft den temporären OpenCV-Videofeed."""
+    frame = np.zeros((1, 1, 3), dtype=np.uint8)
+    capture = FakeCapture(frames=[frame])
+    created_windows: list[tuple[str, int]] = []
+    shown_frames: list[tuple[str, npt.NDArray[np.uint8]]] = []
+    wait_delays: list[int] = []
+    destroyed_windows: list[str] = []
+
+    def fake_wait_key(delay: int) -> int:
+        """Speichert die Wartezeit und simuliert die Taste q."""
+        wait_delays.append(delay)
+        return ord("q")
+
+    monkeypatch.setattr(vision_module, "open_camera_capture", lambda: capture)
+    monkeypatch.setattr(vision_module, "YOLO", lambda _model_path: object())
+    monkeypatch.setattr(vision_module, "MQTTWrapper", FakeMqttWrapper)
+    monkeypatch.setattr(vision_module, "detect_vehicles", lambda _image_source, _model: pytest.fail("q beendet vorher"))
+    monkeypatch.setattr(cv2, "namedWindow", lambda name, flag: created_windows.append((name, flag)))
+    monkeypatch.setattr(cv2, "imshow", lambda name, image: shown_frames.append((name, image)))
+    monkeypatch.setattr(cv2, "waitKey", fake_wait_key)
+    monkeypatch.setattr(cv2, "destroyWindow", lambda name: destroyed_windows.append(name))
+
+    vision_module.run_live_vision(stop_event=threading.Event(), show_video_feed=True)
+
+    assert created_windows == [(vision_module.VIDEO_FEED_WINDOW_NAME, cv2.WINDOW_NORMAL)]
+    assert shown_frames == [(vision_module.VIDEO_FEED_WINDOW_NAME, frame)]
+    assert wait_delays == [1]
+    assert destroyed_windows == [vision_module.VIDEO_FEED_WINDOW_NAME]
+    assert capture.released is True
+
+
 def test_run_example_detection_creates_model_once_and_reuses_it(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
