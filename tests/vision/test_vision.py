@@ -273,10 +273,10 @@ def test_run_example_detection_creates_model_once_and_reuses_it(
         created_model_paths.append(model_path)
         return fake_model
 
-    def fake_imread(image_path: Path) -> npt.NDArray[np.uint8]:
+    def fake_imread(image_path: str) -> npt.NDArray[np.uint8]:
         """Erzeugt ein synthetisches Bild anhand des Dateinamens."""
         image = np.zeros((1, 1, 3), dtype=np.uint8)
-        if image_path.name == "vehicle.JPG":
+        if Path(image_path).name == "vehicle.JPG":
             image[0, 0, 0] = 1
         return image
 

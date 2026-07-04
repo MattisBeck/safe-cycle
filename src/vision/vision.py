@@ -3,6 +3,7 @@
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
 import cv2
 import numpy as np
@@ -37,7 +38,7 @@ def open_camera_capture(pipeline: str = CAMERA_PIPELINE) -> cv2.VideoCapture:
     return capture
 
 
-def detect_vehicles(image_source: np.ndarray, model: YOLO) -> VisionPayload:
+def detect_vehicles(image_source: np.ndarray[Any, Any], model: YOLO) -> VisionPayload:
     """Erkennt relevante Fahrzeuge in einem Bild.
 
     :param image_source: numpy-Array des Bildes.
@@ -102,7 +103,7 @@ def run_example_detection(image_directory_path: Path) -> None:
 
     all_results = []
     for example_image_path in image_directory_path.glob("*.JPG"):
-        example_image_array = cv2.imread(example_image_path)
+        example_image_array = cv2.imread(str(example_image_path))
         if example_image_array is None:
             raise FileNotFoundError(f"Bild konnte nicht gelesen werden: {example_image_path}")
 
