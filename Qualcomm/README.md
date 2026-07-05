@@ -1,27 +1,10 @@
 # Qualcomm-Dateien für die NPU
 
-Dieser Ordner ist für lokale Qualcomm-Dateien gedacht, die für die NPU auf dem
-Radxa Dragon Q6A gebraucht werden.
+Dieser Ordner enthält lokale Qualcomm-Dateien für die NPU auf dem Radxa Dragon
+Q6A. Die Dateien sind groß, teilweise plattformspezifisch und bleiben deshalb
+aus Git ausgeschlossen.
 
-## Was hier liegen muss
-
-Für die aktuelle YOLOv8-NPU-Integration werden zwei Bestandteile gebraucht:
-
-1. `qairt/2.42.0.251225`
-
-   Das ist die Qualcomm AI Runtime. Sie enthält die QNN-Bibliotheken, die
-   HTP-Bibliotheken für die NPU und das Script `bin/envsetup.sh`. Ohne diese
-   Runtime kann Python später kein Modell auf der NPU ausführen.
-
-2. `ai-engine-direct-helper`
-
-   Dieser Helper enthält den Python-Zugriff über `qai_appbuilder`, Beispiele
-   von Qualcomm und aktuell das getestete YOLOv8-Beispielmodell. Das einfache
-   Beispielscript wurde nur benutzt, um zu prüfen, ob die NPU grundsätzlich
-   funktioniert. Die spätere Safe-Cycle-Erkennung soll in `src/vision/vision.py`
-   integriert werden.
-
-Die erwartete lokale Struktur sieht so aus:
+## Erwartete Struktur
 
 ```text
 Qualcomm/
@@ -32,23 +15,38 @@ Qualcomm/
 └── ai-engine-direct-helper/
 ```
 
+## Was die Ordner bedeuten
+
+`qairt/2.42.0.251225/` ist die Qualcomm AI Runtime. Sie enthält die QNN- und
+HTP-Bibliotheken, die das Modell später auf der NPU ausführen.
+
+`ai-engine-direct-helper/` enthält den Python-Zugriff über `qai_appbuilder` und
+Qualcomm-Beispiele. Aus diesem Ordner wird lokal ein Wheel gebaut und in die
+Safe-Cycle-`.venv` installiert.
+
+Offizielle Radxa-Referenzen:
+
+- QAIRT SDK Installation: <https://docs.radxa.com/en/dragon/q6a/app-dev/npu-dev/qairt-install>
+- QAI AppBuilder: <https://docs.radxa.com/en/fogwise/airbox-q900/ai-dev/qai-appbuilder>
+
+Das eigentliche Safe-Cycle-Modell liegt nicht hier, sondern unter:
+
+```text
+src/vision/models/yolov8_det.bin
+```
+
 ## NPU-Umgebung laden
 
-Das Script im Projektstamm setzt nur die nötigen Umgebungsvariablen. Es startet
-keine Bilderkennung und verarbeitet keine Bilder.
-
-Wichtig: Das Script muss mit `source` geladen werden:
+Vor jedem Start des Vision-Moduls muss die aktuelle Shell die Qualcomm-Variablen
+bekommen:
 
 ```bash
 source ./start_npu.sh
 ```
 
-Ein normaler Aufruf wie `bash start_npu.sh` reicht nicht aus. Dann würden die
-Variablen nur in einem Unterprozess gesetzt und wären danach wieder weg.
+Das Script setzt unter anderem:
 
-Nach dem Laden sind unter anderem diese Variablen gesetzt:
-
-```bash
+```text
 QNN_SDK_ROOT
 PRODUCT_SOC
 DSP_ARCH
@@ -56,17 +54,18 @@ ADSP_LIBRARY_PATH
 LD_LIBRARY_PATH
 ```
 
-Diese Variablen werden später von `src/vision/vision.py` benötigt, damit die
-QNN- und HTP-Bibliotheken gefunden werden.
+Ein normaler Aufruf mit `bash start_npu.sh` reicht nicht aus, weil die Variablen
+dann nur in einem Unterprozess gesetzt werden.
 
+## Wo die vollständigen Startschritte stehen
 
-## Spätere Orchestrierung
+Die konkrete Anleitung für Kamera, `.venv`, AppBuilder-Wheel, NPU-Test und
+MQTT-Start steht hier:
 
-Wenn später ein gemeinsames `start.sh` für MQTT, Sensoren, Vision und weitere
-Module entsteht, sollte es zuerst die NPU-Umgebung laden:
-
-```bash
-source ./start_npu.sh
+```text
+hardware_docs/RADXA_SOFTWARE_DEPENDENCIES.md
 ```
 
-Alle danach gestarteten Prozesse erben diese Variablen automatisch.
+Wenn später ein gemeinsames `start.sh` für MQTT, Sensoren und Vision entsteht,
+sollte es zuerst `source ./start_npu.sh` ausführen. Alle danach gestarteten
+Prozesse erben dann die NPU-Variablen.

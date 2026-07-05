@@ -1,79 +1,74 @@
 # Radxa Software Dependencies
 
-Diese Notiz beschreibt die Software, die auf dem Radxa Dragon Q6A für die
-Radxa Camera 4K und das Vision-Modul benötigt wird.
+Diese Anleitung beschreibt den funktionierenden Startpfad für das Vision-Modul
+auf dem Radxa Dragon Q6A: Kamera über GStreamer, YOLOv8 über Qualcomm NPU und
+Ausgabe als MQTT-`VisionPayload`.
 
-## Warum das nötig ist
+## Ziel
 
-Safe Cycle öffnet die Kamera nicht direkt, sondern über eine
-GStreamer-Pipeline:
+Am Ende soll dieser Befehl auf dem Radxa laufen:
 
-```text
-libcamerasrc ! video/x-raw,width=640,height=640 ! videoconvert ! video/x-raw,format=BGR,width=640,height=640 ! appsink
+```bash
+source ./start_npu.sh
+UV_CACHE_DIR=/tmp/safe-cycle-uv-cache PYTHONPATH=src uv run --no-sync --no-dev python -m vision.vision
 ```
 
-Dafür müssen drei Dinge gleichzeitig stimmen:
+`--no-sync` ist wichtig: `uv run` darf kurz vor dem Start keine Pakete ändern,
+sonst kann das systemweite OpenCV wieder verdeckt werden.
 
-1. Die Radxa Camera 4K muss im System aktiviert sein.
-2. GStreamer muss die Quelle `libcamerasrc` kennen.
-3. Das von Python importierte `cv2` muss mit GStreamer-Unterstützung gebaut
-   sein.
+## Referenzen und lokale Dateien
 
-Das normale PyPI-Paket `opencv-python` ist auf dem Radxa nicht ausreichend,
-weil es ohne GStreamer-Unterstützung gebaut wurde.
+Offizielle Radxa-Doku zum Nachschlagen:
 
-## Radxa-Kamera aktivieren
+- Kamera: <https://docs.radxa.com/en/dragon/q6a/accessories/camera-4k>
+- QAIRT SDK Installation: <https://docs.radxa.com/en/dragon/q6a/app-dev/npu-dev/qairt-install>
+- QAI AppBuilder: <https://docs.radxa.com/en/fogwise/airbox-q900/ai-dev/qai-appbuilder>
 
-Die Kamera wird mit dem Radxa-Tool `rsetup` aktiviert:
+Lokal erwartet und nicht in Git: `Qualcomm/qairt/2.42.0.251225/`,
+`Qualcomm/ai-engine-direct-helper/`, `src/vision/models/yolov8_det.bin`.
+
+## 1. Kamera und GStreamer prüfen
+
+Die Radxa Camera 4K muss über `rsetup` aktiviert sein:
 
 ```bash
 rsetup
 ```
 
-Dann in `Overlays` -> `Manage overlays` die passende Option für die Radxa
-Camera 4K am verwendeten CAM-Anschluss aktivieren und danach neu starten.
+Danach unter `Overlays` die passende Radxa-Camera-Option aktivieren und neu starten.
 
-Die offizielle Anleitung steht hier:
-<https://docs.radxa.com/en/dragon/q6a/accessories/camera-4k>
-
-## libcamera und GStreamer
-
-Die Radxa-Anleitung baut libcamera für den einfachen Kameratest mit `qcam`.
-Für Safe Cycle ist zusätzlich wichtig, dass das libcamera-GStreamer-Plugin
-vorhanden ist. Dieses Plugin stellt `libcamerasrc` bereit.
-
-Beim lokalen funktionierenden Stand ist libcamera so gebaut:
+Safe Cycle nutzt OpenCV nicht direkt über `/dev/video*`, sondern über diese
+GStreamer-Pipeline:
 
 ```text
-gstreamer: enabled
-pipelines: simple
-v4l2: enabled
-qcam: enabled
+libcamerasrc ! video/x-raw,width=640,height=640 ! videoconvert ! video/x-raw,format=BGR,width=640,height=640 ! appsink drop=true max-buffers=1 sync=false
 ```
 
-Prüfen:
+Prüfen, ob GStreamer die libcamera-Quelle kennt:
 
 ```bash
 gst-inspect-1.0 libcamerasrc
 ```
 
-Erwartung: Der Befehl zeigt `libcamera Source`. Wenn der Befehl nichts findet,
-fehlt das GStreamer-Plugin. Dann muss libcamera mit GStreamer-Unterstützung
-neu gebaut werden.
+Erwartung: Der Befehl zeigt `libcamera Source`. Wenn nicht, fehlt das
+libcamera-GStreamer-Plugin.
 
-Wichtige Pakete für GStreamer und den Build sind unter anderem:
+## 2. Python-Umgebung auf dem Radxa erstellen
+
+Auf dem Radxa darf nicht das PyPI-Paket `opencv-python` verwendet werden. Es ist
+normalerweise ohne GStreamer gebaut. Die `.venv` muss deshalb das systemweite
+OpenCV sehen:
 
 ```bash
-sudo apt install gstreamer1.0-tools libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+rm -rf .venv
+uv venv --python /usr/bin/python3 --system-site-packages
+uv sync --no-dev
 ```
 
-## OpenCV in Python
-
-Auf dem Radxa soll für den Hardwarebetrieb das systemweite OpenCV verwendet
-werden:
+Prüfen:
 
 ```bash
-python3 -c "import cv2; print(cv2.__file__); print([line for line in cv2.getBuildInformation().splitlines() if 'GStreamer' in line])"
+.venv/bin/python -c "import cv2; print(cv2.__file__); print([line.strip() for line in cv2.getBuildInformation().splitlines() if 'GStreamer' in line])"
 ```
 
 Erwartung:
@@ -83,35 +78,73 @@ Erwartung:
 GStreamer: YES
 ```
 
-Wenn dort `GStreamer: NO` steht, kann OpenCV die Kamera-Pipeline nicht öffnen.
+Wenn dort `GStreamer: NO` steht, nutzt Python das falsche OpenCV.
 
-## uv-Umgebung auf dem Radxa
+## 3. Qualcomm NPU vorbereiten
 
-Die virtuelle Umgebung muss das systemweite OpenCV sehen können. Gleichzeitig
-darf `uv` nicht das PyPI-Paket `opencv-python` in die venv installieren, weil
-dieses das systemweite `cv2` verdecken würde.
-
-Radxa-Setup:
+NPU-Variablen in der aktuellen Shell laden:
 
 ```bash
-rm -rf .venv
-uv venv --python /usr/bin/python3 --system-site-packages
-uv sync --no-dev --no-install-package opencv-python
+source ./start_npu.sh
 ```
 
-Beim Start auf dem Radxa `--no-sync` verwenden, sonst installiert `uv run`
-`opencv-python` wieder nach:
+Danach muss `qai_appbuilder` in der Safe-Cycle-`.venv` installiert werden. Der
+getestete Weg ist ein lokaler Wheel-Build aus dem Qualcomm-Helper:
 
 ```bash
-PYTHONPATH=src uv run --no-sync --no-dev python -m vision.vision
+git -C Qualcomm/ai-engine-direct-helper submodule update --init pybind/pybind11
+uv pip install -r Qualcomm/ai-engine-direct-helper/requirements.txt
+mkdir -p Qualcomm/ai-engine-direct-helper/dist
+cd Qualcomm/ai-engine-direct-helper
+../../.venv/bin/python setup.py bdist_wheel
+cd ../..
+uv pip install Qualcomm/ai-engine-direct-helper/dist/qai_appbuilder-2.38.0-cp312-cp312-linux_aarch64.whl
 ```
 
-## MQTT-Payloads mitlesen
+Prüfen:
+
+```bash
+.venv/bin/python -c "import qai_appbuilder; print(qai_appbuilder.__file__)"
+```
+
+Wenn dieser Import fehlschlägt, kann `vision.vision` die NPU nicht benutzen.
+
+## 4. NPU ohne Kamera testen
+
+Dieser Test verarbeitet kein Kamerabild. Er prüft nur, ob das Safe-Cycle-Modell
+über Qualcomm AppBuilder eine Inferenz auf der NPU starten kann:
+
+```bash
+source ./start_npu.sh
+PYTHONPATH=src .venv/bin/python -c "import numpy as np; from vision.vision import MODEL_PATH; from vision.npu import NpuYoloV8Model; model = NpuYoloV8Model(MODEL_PATH); print(model.predict(np.zeros((640, 640, 3), dtype=np.uint8))); model.release()"
+```
+
+Eine leere Szene darf `class_ids=[]` liefern. Wichtig ist, dass keine
+`qai_appbuilder`-, `QNN_SDK_ROOT`- oder Modellpfad-Fehlermeldung kommt.
+
+## 5. Vision-Modul starten
+
+MQTT-Broker starten:
 
 ```bash
 docker compose up -d mqtt
 ```
 
+Vision starten:
+
+```bash
+source ./start_npu.sh
+UV_CACHE_DIR=/tmp/safe-cycle-uv-cache PYTHONPATH=src uv run --no-sync --no-dev python -m vision.vision
+```
+
+Payloads in einem zweiten Terminal mitschneiden:
+
 ```bash
 docker exec -it mqtt mosquitto_sub -h 127.0.0.1 -p 1883 -t "vision/vehicles" -v
 ```
+
+## Entwicklung auf anderen Geräten
+
+Auf Geräten ohne Radxa-Kamera kann `uv sync --extra desktop-vision` genutzt
+werden. Für den Radxa-Hardwarebetrieb immer die `.venv` mit
+`--system-site-packages` verwenden.
