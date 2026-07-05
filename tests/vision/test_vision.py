@@ -1,10 +1,8 @@
-"""Tests für die YOLO-basierte Fahrzeugerkennung."""
+"""Tests für die NPU-basierte Fahrzeugerkennung."""
 
-import builtins
 import threading
 import time
 from pathlib import Path
-from typing import Any, cast
 
 import cv2
 import numpy as np
@@ -12,56 +10,28 @@ import numpy.typing as npt
 import pytest
 
 from shared.data_models import VisionPayload
+from vision import npu as npu_module
 from vision import vision as vision_module
 
 
-class FakeClassIds:
-    """Stellt die von YOLO gelieferte Klassen-ID-Kette nach."""
-
-    def __init__(self, values: list[builtins.int]) -> None:
-        """Speichert die simulierten Klassen-IDs."""
-        self._values = values
-
-    def int(self) -> "FakeClassIds":
-        """Gibt die IDs als ganzzahlige Werte zurück."""
-        return self
-
-    def tolist(self) -> list[builtins.int]:
-        """Wandelt die IDs in eine Python-Liste um."""
-        return self._values
-
-
-class FakeBoxes:
-    """Stellt die Box-Daten eines YOLO-Ergebnisses nach."""
-
-    def __init__(self, class_ids: list[int]) -> None:
-        """Speichert die simulierten Klassen-IDs als Box-Daten."""
-        self.cls = FakeClassIds(class_ids)
-
-
-class FakeResult:
-    """Stellt ein einzelnes YOLO-Ergebnis nach."""
-
-    def __init__(self, class_ids: list[int], inference_time_ms: float) -> None:
-        """Speichert Boxen und Laufzeitdaten des simulierten Ergebnisses."""
-        self.boxes = FakeBoxes(class_ids)
-        self.speed = {"inference": inference_time_ms}
-
-
 class FakeModel:
-    """Stellt ein aufrufbares YOLO-Modell nach."""
+    """Stellt ein NPU-Modell ohne echte Hardware nach."""
 
     def __init__(self, class_ids: list[int], inference_time_ms: float) -> None:
         """Speichert das vorbereitete Ergebnis und spätere Aufrufdaten."""
-        self.result = FakeResult(class_ids, inference_time_ms)
+        self.class_ids = class_ids
+        self.inference_time_ms = inference_time_ms
         self.received_image: npt.NDArray[np.uint8] | None = None
-        self.received_verbose: bool | None = None
+        self.released = False
 
-    def __call__(self, image_source: npt.NDArray[np.uint8], verbose: bool) -> list[FakeResult]:
+    def predict(self, image_source: npt.NDArray[np.uint8]) -> npu_module.ModelPrediction:
         """Speichert den Aufruf und gibt ein vorbereitetes Ergebnis zurück."""
         self.received_image = image_source
-        self.received_verbose = verbose
-        return [self.result]
+        return npu_module.ModelPrediction(class_ids=self.class_ids, inference_time_ms=self.inference_time_ms)
+
+    def release(self) -> None:
+        """Merkt sich die Freigabe des simulierten Modells."""
+        self.released = True
 
 
 class FakeCapture:
@@ -111,7 +81,7 @@ def test_detect_vehicles_counts_only_relevant_vehicle_classes(monkeypatch: pytes
     image_source = np.zeros((2, 2, 3), dtype=np.uint8)
     model = FakeModel(class_ids=[2, 0, 7, 5], inference_time_ms=12.5)
 
-    payload = vision_module.detect_vehicles(image_source, cast(Any, model))
+    payload = vision_module.detect_vehicles(image_source, model)
 
     assert payload.timestamp_ms == 1_717_618_000_123
     assert payload.found_vehicle is True
@@ -119,7 +89,6 @@ def test_detect_vehicles_counts_only_relevant_vehicle_classes(monkeypatch: pytes
     assert payload.vehicle_count == 3
     assert payload.inference_time_ms == 12.5
     assert model.received_image is image_source
-    assert model.received_verbose is False
 
 
 def test_open_camera_capture_uses_gstreamer_backend(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -136,7 +105,7 @@ def test_open_camera_capture_uses_gstreamer_backend(monkeypatch: pytest.MonkeyPa
 
     capture = vision_module.open_camera_capture("pipeline")
 
-    assert cast(object, capture) is fake_capture
+    assert id(capture) == id(fake_capture)
     assert created_captures == [("pipeline", cv2.CAP_GSTREAMER)]
 
 
@@ -154,7 +123,7 @@ def test_detect_vehicles_returns_empty_payload_without_relevant_classes(monkeypa
     image_source = np.zeros((2, 2, 3), dtype=np.uint8)
     model = FakeModel(class_ids=[0, 1, 15], inference_time_ms=8.0)
 
-    payload = vision_module.detect_vehicles(image_source, cast(Any, model))
+    payload = vision_module.detect_vehicles(image_source, model)
 
     assert payload.timestamp_ms == 1_717_618_001_000
     assert payload.found_vehicle is False
@@ -164,11 +133,11 @@ def test_detect_vehicles_returns_empty_payload_without_relevant_classes(monkeypa
 
 
 def test_run_live_vision_publishes_payloads_and_releases_capture(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Prüft Orchestrierung von Kamera, YOLO und MQTT."""
+    """Prüft Orchestrierung von Kamera, NPU-Modell und MQTT."""
     first_frame = np.zeros((1, 1, 3), dtype=np.uint8)
     second_frame = np.ones((1, 1, 3), dtype=np.uint8)
     capture = FakeCapture(frames=[first_frame, second_frame])
-    fake_model = object()
+    fake_model = FakeModel(class_ids=[], inference_time_ms=1.0)
     created_model_paths: list[Path] = []
     opened_camera = False
     received_frames: list[npt.NDArray[np.uint8]] = []
@@ -179,8 +148,8 @@ def test_run_live_vision_publishes_payloads_and_releases_capture(monkeypatch: py
         opened_camera = True
         return capture
 
-    def fake_yolo(model_path: Path) -> object:
-        """Ersetzt das echte YOLO-Modell."""
+    def fake_npu_model(model_path: Path) -> FakeModel:
+        """Ersetzt das echte NPU-Modell."""
         created_model_paths.append(model_path)
         return fake_model
 
@@ -199,7 +168,7 @@ def test_run_live_vision_publishes_payloads_and_releases_capture(monkeypatch: py
 
     FakeMqttWrapper.instances = []
     monkeypatch.setattr(vision_module, "open_camera_capture", fake_open_camera_capture)
-    monkeypatch.setattr(vision_module, "YOLO", fake_yolo)
+    monkeypatch.setattr(vision_module, "NpuYoloV8Model", fake_npu_model)
     monkeypatch.setattr(vision_module, "detect_vehicles", fake_detect_vehicles)
     monkeypatch.setattr(vision_module, "MQTTWrapper", FakeMqttWrapper)
 
@@ -208,6 +177,7 @@ def test_run_live_vision_publishes_payloads_and_releases_capture(monkeypatch: py
     assert opened_camera is True
     assert created_model_paths == [vision_module.MODEL_PATH]
     assert received_frames == [first_frame, second_frame]
+    assert fake_model.released is True
     assert capture.read_calls == 3
     assert capture.released is True
     assert len(FakeMqttWrapper.instances) == 1
@@ -241,7 +211,9 @@ def test_run_live_vision_releases_capture_when_publish_fails(monkeypatch: pytest
             raise RuntimeError("MQTT kaputt")
 
     monkeypatch.setattr(vision_module, "open_camera_capture", lambda: capture)
-    monkeypatch.setattr(vision_module, "YOLO", lambda _model_path: object())
+    fake_model = FakeModel(class_ids=[], inference_time_ms=1.0)
+
+    monkeypatch.setattr(vision_module, "NpuYoloV8Model", lambda _model_path: fake_model)
     monkeypatch.setattr(vision_module, "detect_vehicles", lambda _image_source, _model: payload)
     monkeypatch.setattr(vision_module, "MQTTWrapper", FailingMqttWrapper)
 
@@ -249,6 +221,7 @@ def test_run_live_vision_releases_capture_when_publish_fails(monkeypatch: pytest
         vision_module.run_live_vision(stop_event=threading.Event())
 
     assert capture.released is True
+    assert fake_model.released is True
 
 
 def test_run_live_vision_shows_video_feed_until_q(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -266,7 +239,11 @@ def test_run_live_vision_shows_video_feed_until_q(monkeypatch: pytest.MonkeyPatc
         return ord("q")
 
     monkeypatch.setattr(vision_module, "open_camera_capture", lambda: capture)
-    monkeypatch.setattr(vision_module, "YOLO", lambda _model_path: object())
+    monkeypatch.setattr(
+        vision_module,
+        "NpuYoloV8Model",
+        lambda _model_path: FakeModel(class_ids=[], inference_time_ms=1.0),
+    )
     monkeypatch.setattr(vision_module, "MQTTWrapper", FakeMqttWrapper)
     monkeypatch.setattr(vision_module, "detect_vehicles", lambda _image_source, _model: pytest.fail("q beendet vorher"))
     monkeypatch.setattr(cv2, "namedWindow", lambda name, flag: created_windows.append((name, flag)))
@@ -288,7 +265,7 @@ def test_run_example_detection_creates_model_once_and_reuses_it(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Prüft den lokalen Beispiel-Runner ohne echte Bilder oder YOLO-Modell."""
+    """Prüft den lokalen Beispiel-Runner ohne echte Bilder oder NPU-Modell."""
     example_image_directory_path = tmp_path / ".local" / "test_images"
     example_image_directory_path.mkdir(parents=True)
     vehicle_image_path = example_image_directory_path / "vehicle.JPG"
@@ -296,12 +273,12 @@ def test_run_example_detection_creates_model_once_and_reuses_it(
     vehicle_image_path.write_bytes(b"kein echtes Bild")
     empty_image_path.write_bytes(b"kein echtes Bild")
 
-    fake_model = object()
+    fake_model = FakeModel(class_ids=[], inference_time_ms=1.0)
     created_model_paths: list[Path] = []
     received_models: list[object] = []
 
-    def fake_yolo(model_path: Path) -> object:
-        """Ersetzt die echte YOLO-Erzeugung im Test."""
+    def fake_npu_model(model_path: Path) -> FakeModel:
+        """Ersetzt die echte NPU-Modellerzeugung im Test."""
         created_model_paths.append(model_path)
         return fake_model
 
@@ -324,7 +301,7 @@ def test_run_example_detection_creates_model_once_and_reuses_it(
             inference_time_ms=1.0,
         )
 
-    monkeypatch.setattr(vision_module, "YOLO", fake_yolo)
+    monkeypatch.setattr(vision_module, "NpuYoloV8Model", fake_npu_model)
     monkeypatch.setattr(cv2, "imread", fake_imread)
     monkeypatch.setattr(vision_module, "detect_vehicles", fake_detect_vehicles)
 
