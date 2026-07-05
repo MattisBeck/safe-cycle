@@ -5,10 +5,13 @@ description = "Erfassung und Auswertung kritischer Überholvorgänge bei Fahrrä
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "numpy>=2.5.0",
-    "opencv-python>=4.13.0.92",
+    "numpy>=1.26,<2",
     "paho-mqtt==2.1.0",
-    "ultralytics>=8.4.68",
+]
+
+[project.optional-dependencies]
+desktop-vision = [
+    "opencv-python>=4.6,<4.12",
 ]
 
 [dependency-groups]
@@ -40,3 +43,7 @@ mypy_path = "src"
 explicit_package_bases = true
 strict = true
 warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = ["cv2"]
+ignore_missing_imports = true

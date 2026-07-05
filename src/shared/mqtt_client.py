@@ -12,6 +12,7 @@ from typing import Any, Callable
 import paho.mqtt.client as mqtt
 from paho.mqtt.enums import CallbackAPIVersion
 
+from shared.config import MQTT_BROKER_IP, MQTT_BROKER_PORT
 from shared.mqtt_topics import TOPIC_PAYLOAD_TYPES, PayloadType
 
 TOPIC_SCHEMA: dict[str, PayloadType] = TOPIC_PAYLOAD_TYPES
@@ -25,7 +26,7 @@ class MQTTWrapper:
     empfangen werden soll.
     """
 
-    def __init__(self, broker_ip: str, broker_port: int) -> None:
+    def __init__(self, broker_ip: str = MQTT_BROKER_IP, broker_port: int = MQTT_BROKER_PORT) -> None:
         """Erstellt den MQTT-Client und startet den Nachrichtenaustausch.
 
         Der MQTT-Broker ist die zentrale Verteilstelle für Nachrichten.
