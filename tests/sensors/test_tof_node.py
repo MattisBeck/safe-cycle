@@ -1,6 +1,6 @@
 """Tests für den ToF-Sensor-Node (VL53L1X)."""
 
-from unittest.mock import Mock
+from unittest.mock import Mock, PropertyMock
 
 from sensors.tof_node import create_tof_payload, read_sensor
 
@@ -69,8 +69,6 @@ def test_read_sensor_exception() -> None:
     mock_sensor.data_ready = True
     # Zugriff auf distance wirft Exception
     type(mock_sensor).distance = PropertyMock(side_effect=OSError("I2C failure"))
-
-    from unittest.mock import PropertyMock
 
     result = read_sensor(mock_sensor)
     assert result is None
