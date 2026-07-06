@@ -45,5 +45,5 @@ strict = true
 warn_unused_configs = true
 
 [[tool.mypy.overrides]]
-module = ["cv2"]
+module = ["cv2", "adafruit_vl53l0x", "board", "busio"]
 ignore_missing_imports = true

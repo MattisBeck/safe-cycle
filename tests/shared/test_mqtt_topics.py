@@ -8,7 +8,8 @@ from shared.mqtt_topics import TOPIC_PAYLOAD_TYPES, PayloadType
 
 EXPECTED_TOPIC_PAYLOAD_TYPES: Final[dict[str, PayloadType]] = {
     "sensors/radar": RadarPayload,
-    "sensors/tof": TofPayload,
+    "sensors/tof/left": TofPayload,
+    "sensors/tof/right": TofPayload,
     "sensors/gps": GpsPayload,
     "sensors/imu": ImuPayload,
     "vision/vehicles": VisionPayload,
