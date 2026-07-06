@@ -3,9 +3,6 @@
 Dieses Modul liest Distanzwerte der zwei VL53L0X-Sensoren (links und rechts)
 aus und veröffentlicht sie über MQTT.
 
-Hardware-Pins am Radxa Q6A:
-- Links: SCL = GPIO 49, SDA = GPIO 48
-- Rechts: SCL = GPIO 1, SDA = GPIO 0
 """
 
 import time
@@ -19,81 +16,104 @@ class TofSensor(Protocol):
     """Schnittstelle für den ToF-Sensor für leichtere Testbarkeit."""
 
     @property
-    def range(self) -> int:
-        """Gibt die gemessene Distanz in Millimetern zurück."""
+    def distance(self) -> float:
+        """Gibt die gemessene Distanz in Zentimetern zurück."""
+        ...
+
+    @property
+    def data_ready(self) -> bool:
+        """Gibt True zurück, wenn neue Messdaten bereitstehen."""
+        ...
+
+    def clear_interrupt(self) -> None:
+        """Löscht den Interrupt, um die nächste Messung zu starten."""
         ...
 
 
-def create_tof_payload(distance_mm: int | None) -> TofPayload:
+def create_tof_payload(distance_cm: float | None) -> TofPayload:
     """Wandelt die gelesene Distanz in eine MQTT-Payload um.
 
     Wenn None übergeben wird (z. B. bei Sensorfehlern oder fehlendem Sensor),
-    wird eine Payload mit is_valid=False generiert. Die Distanz wird von
-    Millimetern in Zentimeter umgerechnet.
+    wird eine Payload mit is_valid=False generiert.
 
-    :param distance_mm: Die vom VL53L0X gemessene Distanz in Millimetern oder None.
+    :param distance_cm: Die vom VL53L1X gemessene Distanz in Zentimetern oder None.
     :return: Die fertige TofPayload mit der Distanz in cm.
     """
     now_ms = int(time.time() * 1000)
 
-    if distance_mm is None:
+    if distance_cm is None:
         return TofPayload(timestamp_ms=now_ms, distance_cm=0.0, is_valid=False)
 
-    # Werte über 8000 mm sind typischerweise Fehlercodes beim VL53L0X.
-    is_valid = 0 < distance_mm < 8000
+    # VL53L1X kann im Long-Range-Modus bis zu 400 cm (oder mehr) messen.
+    # Werte über 800 cm sind typischerweise Fehler- bzw. Out-of-Range-Werte.
+    is_valid = 0 < distance_cm < 800.0
     return TofPayload(
         timestamp_ms=now_ms,
-        distance_cm=distance_mm / 10.0,
+        distance_cm=distance_cm,
         is_valid=is_valid,
     )
 
-def read_sensor(sensor: TofSensor | None) -> int | None:
-    """Liest den Sensorwert sicher aus (Boundary Function für I/O)."""
+
+def read_sensor(sensor: TofSensor | None) -> float | None:
+    """Liest den Sensorwert sicher aus (Boundary Function für I/O).
+
+    Gibt den Abstand in cm zurück, falls neue Daten bereitstehen, andernfalls None.
+    Bei Fehlern wird None zurückgegeben, was im weiteren Verlauf als ungültig markiert wird.
+    """
     if sensor is None:
         return None
     try:
-        return sensor.range
+        if sensor.data_ready:
+            dist = sensor.distance
+            sensor.clear_interrupt()
+            return dist
     except Exception:
         return None
+    return None
 
 
 def run_node() -> None:
     """Initialisiert die Sensoren und veröffentlicht die Messwerte dauerhaft."""
     try:
-        import adafruit_vl53l0x
+        import adafruit_vl53l1x
         from adafruit_extended_bus import ExtendedI2C as I2C
     except ImportError:
-        print("Fehler: adafruit-circuitpython-vl53l0x oder adafruit-extended-bus ist nicht installiert.")
+        print("Fehler: adafruit-circuitpython-vl53l1x oder adafruit-extended-bus ist nicht installiert.")
         return
 
     mqtt = MQTTWrapper()
 
-    sensor_left: adafruit_vl53l0x.VL53L0X | None = None
-    sensor_right: adafruit_vl53l0x.VL53L0X | None = None
+    sensor_left: adafruit_vl53l1x.VL53L1X | None = None
+    sensor_right: adafruit_vl53l1x.VL53L1X | None = None
 
     # Linker Sensor: I2C-Bus 6
     try:
         i2c_left = I2C(6)
-        sensor_left = adafruit_vl53l0x.VL53L0X(i2c_left)
+        sensor_left = adafruit_vl53l1x.VL53L1X(i2c_left)
+        sensor_left.start_ranging()
     except Exception as e:
         print(f"Linker Sensor konnte nicht initialisiert werden: {e}")
 
-    # Rechter Sensor: I2C-Bus 12
+    # Rechter Sensor: I2C-Bus 0
     try:
-        i2c_right = I2C(12)
-        sensor_right = adafruit_vl53l0x.VL53L0X(i2c_right)
+        i2c_right = I2C(0)
+        sensor_right = adafruit_vl53l1x.VL53L1X(i2c_right)
+        sensor_right.start_ranging()
     except Exception as e:
         print(f"Rechter Sensor konnte nicht initialisiert werden: {e}")
 
     try:
         while True:
-            left_mm = read_sensor(sensor_left)
-            left_payload = create_tof_payload(left_mm)
-            mqtt.publish("sensors/tof/left", left_payload)
+            left_cm = read_sensor(sensor_left)
+            # Nur senden, wenn tatsächlich neue Sensordaten gelesen wurden
+            if left_cm is not None:
+                left_payload = create_tof_payload(left_cm)
+                mqtt.publish("sensors/tof/left", left_payload)
 
-            right_mm = read_sensor(sensor_right)
-            right_payload = create_tof_payload(right_mm)
-            mqtt.publish("sensors/tof/right", right_payload)
+            right_cm = read_sensor(sensor_right)
+            if right_cm is not None:
+                right_payload = create_tof_payload(right_cm)
+                mqtt.publish("sensors/tof/right", right_payload)
 
             time.sleep(0.05)  # 20 Hz Leserate
     except KeyboardInterrupt:
