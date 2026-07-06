@@ -60,9 +60,9 @@ def read_sensor(sensor: TofSensor | None) -> int | None:
 def run_node() -> None:
     """Initialisiert die Sensoren und veröffentlicht die Messwerte dauerhaft."""
     try:
-        import adafruit_vl53l0x  # type: ignore[import-untyped]
-        import board  # type: ignore[import-untyped]
-        import busio  # type: ignore[import-untyped]
+        import adafruit_vl53l0x
+        import board
+        import busio
     except ImportError:
         print("Fehler: adafruit-circuitpython-vl53l0x oder blinka ist nicht installiert.")
         return
