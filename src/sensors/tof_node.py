@@ -9,7 +9,7 @@ Hardware-Pins am Radxa Q6A:
 """
 
 import time
-from typing import Any, Protocol
+from typing import Protocol
 
 from shared.data_models import TofPayload
 from shared.mqtt_client import MQTTWrapper
@@ -47,7 +47,7 @@ def create_tof_payload(distance_mm: int | None) -> TofPayload:
         is_valid=is_valid,
     )
 
-def read_sensor(sensor: Any) -> int | None:
+def read_sensor(sensor: TofSensor | None) -> int | None:
     """Liest den Sensorwert sicher aus (Boundary Function für I/O)."""
     if sensor is None:
         return None
