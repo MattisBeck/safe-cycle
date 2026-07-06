@@ -61,10 +61,9 @@ def run_node() -> None:
     """Initialisiert die Sensoren und veröffentlicht die Messwerte dauerhaft."""
     try:
         import adafruit_vl53l0x
-        import board
-        import busio
+        from adafruit_extended_bus import ExtendedI2C as I2C
     except ImportError:
-        print("Fehler: adafruit-circuitpython-vl53l0x oder blinka ist nicht installiert.")
+        print("Fehler: adafruit-circuitpython-vl53l0x oder adafruit-extended-bus ist nicht installiert.")
         return
 
     mqtt = MQTTWrapper()
@@ -72,16 +71,16 @@ def run_node() -> None:
     sensor_left: adafruit_vl53l0x.VL53L0X | None = None
     sensor_right: adafruit_vl53l0x.VL53L0X | None = None
 
-    # Linker Sensor: SCL = GPIO 49, SDA = GPIO 48
+    # Linker Sensor: I2C-Bus 6
     try:
-        i2c_left = busio.I2C(scl=board.D49, sda=board.D48)
+        i2c_left = I2C(6)
         sensor_left = adafruit_vl53l0x.VL53L0X(i2c_left)
     except Exception as e:
         print(f"Linker Sensor konnte nicht initialisiert werden: {e}")
 
-    # Rechter Sensor: SCL = GPIO 1, SDA = GPIO 0
+    # Rechter Sensor: I2C-Bus 12
     try:
-        i2c_right = busio.I2C(scl=board.D1, sda=board.D0)
+        i2c_right = I2C(12)
         sensor_right = adafruit_vl53l0x.VL53L0X(i2c_right)
     except Exception as e:
         print(f"Rechter Sensor konnte nicht initialisiert werden: {e}")
