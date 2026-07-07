@@ -1,12 +1,12 @@
 """Anbindung der seitlich gerichteten ToF-Sensoren.
 
 Dieses Modul liest Distanzwerte der zwei VL53L1X-Sensoren (links und rechts)
-aus und veröffentlicht sie über MQTT.
+aus und veröffentlicht sie über MQTT. Es nutzt die Pimoroni VL53L1X-Bibliothek.
 
 """
 
 import time
-from typing import Protocol
+from typing import Any, Protocol
 
 from shared.data_models import TofPayload
 from shared.mqtt_client import MQTTWrapper
@@ -15,13 +15,24 @@ from shared.mqtt_client import MQTTWrapper
 class TofSensor(Protocol):
     """Schnittstelle für den ToF-Sensor für leichtere Testbarkeit."""
 
-    @property
-    def distance(self) -> float | None:
-        """Gibt die gemessene Distanz in Zentimetern zurück."""
+    def open(self) -> None:
+        """Öffnet die I2C-Verbindung zum Sensor."""
         ...
 
-    def clear_interrupt(self) -> None:
-        """Setzt den Interrupt zurück für die nächste Messung."""
+    def set_timing(self, timing_budget: int, inter_measurement_period: int) -> None:
+        """Setzt das Timing-Budget und das Messintervall."""
+        ...
+
+    def start_ranging(self, mode: int) -> None:
+        """Startet die kontinuierliche Messung im angegebenen Modus."""
+        ...
+
+    def stop_ranging(self) -> None:
+        """Stoppt die kontinuierliche Messung."""
+        ...
+
+    def get_distance(self) -> int:
+        """Gibt die gemessene Distanz in Millimetern zurück."""
         ...
 
 
@@ -49,14 +60,16 @@ def create_tof_payload(distance_cm: float | None) -> TofPayload:
 
 
 def read_sensor(sensor: TofSensor | None) -> float | None:
-    """Liest den Sensorwert sicher aus (Boundary Function für I/O)."""
+    """Liest den Sensorwert sicher aus (Boundary Function für I/O).
+
+    Der gelesene Wert in Millimetern wird in Zentimeter umgerechnet.
+    Bei Fehlern oder wenn kein Sensor vorhanden ist, wird None zurückgegeben.
+    """
     if sensor is None:
         return None
     try:
-        dist = sensor.distance
-        if dist is not None:
-            sensor.clear_interrupt()
-        return dist
+        dist_mm = sensor.get_distance()
+        return dist_mm / 10.0
     except Exception:
         return None
 
@@ -64,34 +77,31 @@ def read_sensor(sensor: TofSensor | None) -> float | None:
 def run_node() -> None:
     """Initialisiert die Sensoren und veröffentlicht die Messwerte dauerhaft."""
     try:
-        import adafruit_vl53l1x
-        from adafruit_extended_bus import ExtendedI2C as I2C
+        import VL53L1X
     except ImportError:
-        print("Fehler: adafruit-circuitpython-vl53l1x oder adafruit-extended-bus ist nicht installiert.")
+        print("Fehler: VL53L1X ist nicht installiert.")
         return
 
     mqtt = MQTTWrapper()
 
-    sensor_left: adafruit_vl53l1x.VL53L1X | None = None
-    sensor_right: adafruit_vl53l1x.VL53L1X | None = None
+    sensor_left: Any = None
+    sensor_right: Any = None
 
     # Linker Sensor: I2C-Bus 6
     try:
-        i2c_left = I2C(6)
-        sensor_left = adafruit_vl53l1x.VL53L1X(i2c_left)
-        sensor_left.distance_mode = 2  # Long-Range-Modus (bis 4 m)
-        sensor_left.timing_budget = 50  # 50 ms Timing-Budget
-        sensor_left.start_ranging()
+        sensor_left = VL53L1X.VL53L1X(i2c_bus=6, i2c_address=0x29)
+        sensor_left.open()
+        sensor_left.set_timing(50000, 50)  # 50 ms Timing-Budget, 50 ms Intervall
+        sensor_left.start_ranging(3)       # Modus 3: Long Range
     except Exception as e:
         print(f"Linker Sensor konnte nicht initialisiert werden: {e}")
 
     # Rechter Sensor: I2C-Bus 0
     try:
-        i2c_right = I2C(0)
-        sensor_right = adafruit_vl53l1x.VL53L1X(i2c_right)
-        sensor_right.distance_mode = 2  # Long-Range-Modus (bis 4 m)
-        sensor_right.timing_budget = 50  # 50 ms Timing-Budget
-        sensor_right.start_ranging()
+        sensor_right = VL53L1X.VL53L1X(i2c_bus=0, i2c_address=0x29)
+        sensor_right.open()
+        sensor_right.set_timing(50000, 50)  # 50 ms Timing-Budget, 50 ms Intervall
+        sensor_right.start_ranging(3)       # Modus 3: Long Range
     except Exception as e:
         print(f"Rechter Sensor konnte nicht initialisiert werden: {e}")
 

@@ -1,6 +1,6 @@
-"""Tests für den ToF-Sensor-Node (VL53L1X)."""
+"""Tests für den ToF-Sensor-Node (VL53L1X mit Pimoroni-Bibliothek)."""
 
-from unittest.mock import Mock, PropertyMock
+from unittest.mock import Mock
 
 from sensors.tof_node import create_tof_payload, read_sensor
 
@@ -38,13 +38,12 @@ def test_create_tof_payload_none() -> None:
 
 
 def test_read_sensor_valid() -> None:
-    """Prüft, dass die Distanz aus .distance gelesen und der Interrupt zurückgesetzt wird."""
+    """Prüft, dass die Distanz aus get_distance() gelesen und in cm umgerechnet wird."""
     mock_sensor = Mock()
-    mock_sensor.distance = 150.0
+    mock_sensor.get_distance.return_value = 1500  # 1500 mm = 150 cm
 
     result = read_sensor(mock_sensor)
     assert result == 150.0
-    mock_sensor.clear_interrupt.assert_called_once()
 
 
 def test_read_sensor_none() -> None:
@@ -56,8 +55,7 @@ def test_read_sensor_none() -> None:
 def test_read_sensor_exception() -> None:
     """Prüft, dass bei I2C-Fehlern None zurückgegeben wird."""
     mock_sensor = Mock()
-    # Zugriff auf distance wirft Exception
-    type(mock_sensor).distance = PropertyMock(side_effect=OSError("I2C failure"))
+    mock_sensor.get_distance.side_effect = OSError("I2C failure")
 
     result = read_sensor(mock_sensor)
     assert result is None

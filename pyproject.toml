@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "adafruit-blinka>=9.1.0",
-    "adafruit-circuitpython-vl53l1x>=1.2.0",
+    "vl53l1x>=0.0.6; sys_platform == 'linux'",
     "adafruit-extended-bus>=1.0.2",
     "numpy>=1.26,<2",
     "paho-mqtt==2.1.0",
@@ -48,5 +48,5 @@ strict = true
 warn_unused_configs = true
 
 [[tool.mypy.overrides]]
-module = ["cv2", "adafruit_vl53l1x", "adafruit_extended_bus"]
+module = ["cv2", "VL53L1X", "adafruit_extended_bus"]
 ignore_missing_imports = true
