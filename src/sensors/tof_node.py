@@ -75,7 +75,7 @@ def read_sensor(sensor: TofSensor | None) -> float | None:
         return None
     try:
         future = executor.submit(_get_distance_task, sensor)
-        dist_mm = future.result(timeout=0.02)
+        dist_mm = future.result(timeout=0.10)
         return dist_mm / 10.0
     except Exception:
         return None
