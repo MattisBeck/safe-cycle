@@ -48,5 +48,5 @@ strict = true
 warn_unused_configs = true
 
 [[tool.mypy.overrides]]
-module = ["cv2", "VL53L1X", "adafruit_extended_bus"]
+module = ["cv2", "VL53L1X"]
 ignore_missing_imports = true

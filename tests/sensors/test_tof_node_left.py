@@ -1,15 +1,15 @@
-"""Tests für den ToF-Sensor-Node (VL53L1X mit Pimoroni-Bibliothek)."""
+"""Tests für den ToF-Sensor-Node (VL53L1X mit Pimoroni-Bibliothek) (links)."""
 
 from unittest.mock import Mock
 
-from sensors.tof_node import create_tof_payload, read_sensor
+from sensors.tof_node_left import create_tof_payload, read_sensor
 
 
 def test_tof_node_can_be_imported() -> None:
     """Prüft, ob das ToF-Modul ohne angeschlossene Hardware importierbar ist."""
-    from sensors import tof_node
+    from sensors import tof_node_left
 
-    assert tof_node.__name__ == "sensors.tof_node"
+    assert tof_node_left.__name__ == "sensors.tof_node_left"
 
 
 def test_create_tof_payload_valid() -> None:
