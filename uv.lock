@@ -80,16 +80,16 @@ wheels = [
 ]
 
 [[package]]
-name = "adafruit-circuitpython-vl53l0x"
-version = "3.6.19"
+name = "adafruit-circuitpython-vl53l1x"
+version = "1.2.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "adafruit-blinka" },
     { name = "adafruit-circuitpython-busdevice" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/64/76/1c0d1ad2eb1323f5d6f8319a055be026e2bd2b16ae4e6ed8201968430862/adafruit_circuitpython_vl53l0x-3.6.19.tar.gz", hash = "sha256:70a5566f0f7c945248752905563040de4dc8f917ce0b2d810782ae69a0ffc270", size = 30334, upload-time = "2026-04-23T21:13:04.652Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/da/9e/216aa8e29d56dd4a5ce07c6347c723156da40faf9dd47ac835e5a7625533/adafruit_circuitpython_vl53l1x-1.2.9.tar.gz", hash = "sha256:73048d6462c1f038c2b37508874ae1b957047d3674704444c8b5e7284c07345a", size = 28793, upload-time = "2026-04-23T21:13:21.983Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fc/f1/1a26fd6de607b3e32d733cc6d13da628dac7abf0ae3072bbc868d897939c/adafruit_circuitpython_vl53l0x-3.6.19-py3-none-any.whl", hash = "sha256:00022013369c69730d96ce89367090633d80d2e87417aaf53e9f5186ac2d2aac", size = 9761, upload-time = "2026-04-23T21:13:03.841Z" },
+    { url = "https://files.pythonhosted.org/packages/e4/e1/2e984fdfaa0640eb12cb5be73035f932c14b11ff9da3abb92359f3f947e0/adafruit_circuitpython_vl53l1x-1.2.9-py3-none-any.whl", hash = "sha256:9032113ef6b4340a9d9ec5182213f618b9a38900d82a9e8b140ce47a12ddcd53", size = 8352, upload-time = "2026-04-23T21:13:20.712Z" },
 ]
 
 [[package]]
@@ -393,7 +393,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "adafruit-blinka" },
-    { name = "adafruit-circuitpython-vl53l0x" },
+    { name = "adafruit-circuitpython-vl53l1x" },
     { name = "adafruit-extended-bus" },
     { name = "numpy" },
     { name = "paho-mqtt" },
@@ -415,7 +415,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "adafruit-blinka", specifier = ">=9.1.0" },
-    { name = "adafruit-circuitpython-vl53l0x", specifier = ">=3.6.19" },
+    { name = "adafruit-circuitpython-vl53l1x", specifier = ">=1.2.0" },
     { name = "adafruit-extended-bus", specifier = ">=1.0.2" },
     { name = "numpy", specifier = ">=1.26,<2" },
     { name = "opencv-python", marker = "extra == 'desktop-vision'", specifier = ">=4.6,<4.12" },

@@ -1,4 +1,4 @@
-"""Tests für den ToF-Sensor-Node (VL53L0X)."""
+"""Tests für den ToF-Sensor-Node (VL53L1X)."""
 
 from unittest.mock import Mock, PropertyMock
 
@@ -13,8 +13,8 @@ def test_tof_node_can_be_imported() -> None:
 
 
 def test_create_tof_payload_valid() -> None:
-    """Prüft die erfolgreiche Umrechnung von mm in cm und is_valid=True."""
-    payload = create_tof_payload(1500)  # 1500 mm = 150 cm
+    """Prüft die erfolgreiche Payload-Generierung mit gültigen Werten."""
+    payload = create_tof_payload(150.0)  # 150.0 cm
 
     assert payload.is_valid is True
     assert payload.distance_cm == 150.0
@@ -22,11 +22,11 @@ def test_create_tof_payload_valid() -> None:
 
 
 def test_create_tof_payload_invalid_range() -> None:
-    """Prüft das Verhalten bei unrealistischen Distanzwerten (Fehlercodes)."""
-    payload = create_tof_payload(8190)  # VL53L0X Fehlerwert (Out of range)
+    """Prüft das Verhalten bei Distanzwerten außerhalb der Reichweite."""
+    payload = create_tof_payload(450.0)  # 450.0 cm (VL53L1X max ist ~400 cm)
 
     assert payload.is_valid is False
-    assert payload.distance_cm == 819.0
+    assert payload.distance_cm == 450.0
 
 
 def test_create_tof_payload_none() -> None:
@@ -38,12 +38,13 @@ def test_create_tof_payload_none() -> None:
 
 
 def test_read_sensor_valid() -> None:
-    """Prüft, dass die Distanz aus .range gelesen wird."""
+    """Prüft, dass die Distanz aus .distance gelesen und der Interrupt zurückgesetzt wird."""
     mock_sensor = Mock()
-    mock_sensor.range = 1500
+    mock_sensor.distance = 150.0
 
     result = read_sensor(mock_sensor)
-    assert result == 1500
+    assert result == 150.0
+    mock_sensor.clear_interrupt.assert_called_once()
 
 
 def test_read_sensor_none() -> None:
@@ -55,8 +56,8 @@ def test_read_sensor_none() -> None:
 def test_read_sensor_exception() -> None:
     """Prüft, dass bei I2C-Fehlern None zurückgegeben wird."""
     mock_sensor = Mock()
-    # Zugriff auf range wirft Exception
-    type(mock_sensor).range = PropertyMock(side_effect=OSError("I2C failure"))
+    # Zugriff auf distance wirft Exception
+    type(mock_sensor).distance = PropertyMock(side_effect=OSError("I2C failure"))
 
     result = read_sensor(mock_sensor)
     assert result is None
