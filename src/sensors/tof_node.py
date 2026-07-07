@@ -6,7 +6,6 @@ aus und veröffentlicht sie über MQTT. Es nutzt die Pimoroni VL53L1X-Bibliothek
 """
 
 import time
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Protocol
 
 from shared.data_models import TofPayload
@@ -20,6 +19,10 @@ class TofSensor(Protocol):
         """Öffnet die I2C-Verbindung zum Sensor."""
         ...
 
+    def set_timing(self, timing_budget: int, inter_measurement_period: int) -> None:
+        """Setzt das Timing-Budget und das Messintervall."""
+        ...
+
     def start_ranging(self, mode: int) -> None:
         """Startet die kontinuierliche Messung im angegebenen Modus."""
         ...
@@ -31,15 +34,6 @@ class TofSensor(Protocol):
     def get_distance(self) -> int:
         """Gibt die gemessene Distanz in Millimetern zurück."""
         ...
-
-
-# ThreadPoolExecutor, um blockierende I2C-Aufrufe asynchron zu behandeln
-executor = ThreadPoolExecutor(max_workers=2)
-
-
-def _get_distance_task(sensor: TofSensor) -> int:
-    """Führt den blockierenden I2C-Leseaufruf aus."""
-    return sensor.get_distance()
 
 
 def create_tof_payload(distance_cm: float | None) -> TofPayload:
@@ -66,16 +60,16 @@ def create_tof_payload(distance_cm: float | None) -> TofPayload:
 
 
 def read_sensor(sensor: TofSensor | None) -> float | None:
-    """Liest den Sensorwert sicher aus und verhindert Blockaden (Boundary Function für I/O).
+    """Liest den Sensorwert sicher aus (Boundary Function für I/O).
 
     Der gelesene Wert in Millimetern wird in Zentimeter umgerechnet.
-    Nutzt ein kurzes Timeout von 20 ms im Hintergrundthread, um I2C-Hänger abzufangen.
+    Bei Fehlern oder wenn kein Sensor vorhanden ist, wird None zurückgegeben.
+    Dies blockiert im Normalbetrieb nicht länger als das Timing-Budget (50 ms).
     """
     if sensor is None:
         return None
     try:
-        future = executor.submit(_get_distance_task, sensor)
-        dist_mm = future.result(timeout=0.10)
+        dist_mm = sensor.get_distance()
         return dist_mm / 10.0
     except Exception:
         return None
@@ -98,18 +92,21 @@ def run_node() -> None:
     try:
         sensor_left = VL53L1X.VL53L1X(i2c_bus=6, i2c_address=0x29)
         sensor_left.open()
-        sensor_left.start_ranging(3)       # Modus 3: Long Range (nutzt standardmäßig 50 ms)
+        sensor_left.set_timing(33000, 50)
+        sensor_left.start_ranging(3)  # Modus 3: Long Range
     except Exception as e:
         print(f"Linker Sensor konnte nicht initialisiert werden: {e}")
+        sensor_left = None
 
     # Rechter Sensor: I2C-Bus 0
     try:
         sensor_right = VL53L1X.VL53L1X(i2c_bus=0, i2c_address=0x29)
         sensor_right.open()
-        sensor_right.start_ranging(3)       # Modus 3: Long Range (nutzt standardmäßig 50 ms)
+        sensor_right.set_timing(33000, 50)
+        sensor_right.start_ranging(3)
     except Exception as e:
         print(f"Rechter Sensor konnte nicht initialisiert werden: {e}")
-
+        sensor_right = None
     try:
         while True:
             start_time = time.time()
@@ -122,7 +119,7 @@ def run_node() -> None:
             right_payload = create_tof_payload(right_cm)
             mqtt.publish("sensors/tof/right", right_payload)
 
-            # Garantiert ein präzises Timing von exakt 20 Hz
+            # Garantiert ein präzises Timing von exakt 20 Hz (50 ms Periode)
             elapsed = time.time() - start_time
             sleep_time = max(0.001, 0.05 - elapsed)
             time.sleep(sleep_time)
@@ -136,7 +133,6 @@ def run_node() -> None:
                 except Exception:
                     pass
         mqtt.close()
-        executor.shutdown(wait=False)
 
 
 if __name__ == "__main__":
