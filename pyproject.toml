@@ -10,6 +10,7 @@ dependencies = [
     "adafruit-extended-bus>=1.0.2",
     "numpy>=1.26,<2",
     "paho-mqtt==2.1.0",
+    "pyserial>=3.5",
 ]
 
 [project.optional-dependencies]
@@ -48,5 +49,5 @@ strict = true
 warn_unused_configs = true
 
 [[tool.mypy.overrides]]
-module = ["cv2", "VL53L1X"]
+module = ["cv2", "VL53L1X", "serial"]
 ignore_missing_imports = true

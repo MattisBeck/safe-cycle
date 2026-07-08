@@ -383,6 +383,7 @@ dependencies = [
     { name = "adafruit-extended-bus" },
     { name = "numpy" },
     { name = "paho-mqtt" },
+    { name = "pyserial" },
     { name = "vl53l1x", marker = "sys_platform == 'linux'" },
 ]
 
@@ -406,6 +407,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.26,<2" },
     { name = "opencv-python", marker = "extra == 'desktop-vision'", specifier = ">=4.6,<4.12" },
     { name = "paho-mqtt", specifier = "==2.1.0" },
+    { name = "pyserial", specifier = ">=3.5" },
     { name = "vl53l1x", marker = "sys_platform == 'linux'", specifier = ">=0.0.6" },
 ]
 provides-extras = ["desktop-vision"]
