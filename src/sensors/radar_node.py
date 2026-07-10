@@ -173,10 +173,10 @@ def read_frame(serial_port: SerialPort | None) -> bytes | None:
         return None
 
 
-def run_radar_node(port_name: str = "/dev/ttyS6", baudrate: int = 115200) -> None:
+def run_radar_node(port_name: str = "/dev/ttyHS1", baudrate: int = 115200) -> None:
     """Initialisiert das Radar und veröffentlicht die Messwerte dauerhaft.
 
-    :param port_name: Name des seriellen Ports (Standard: /dev/ttyS6 für UART 6).
+    :param port_name: Name des seriellen Ports (Standard: /dev/ttyHS1).
     :param baudrate: Baudrate für die serielle Verbindung (Standard LD2451: 115200).
     """
     try:
