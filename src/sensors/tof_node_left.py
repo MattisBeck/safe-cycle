@@ -87,9 +87,9 @@ def run_left_node() -> None:
 
     sensor_left: Any = None
 
-    # Linker Sensor: I2C-Bus 6
+    # Linker Sensor: I2C-Bus 14
     try:
-        sensor_left = VL53L1X.VL53L1X(i2c_bus=6, i2c_address=0x29)
+        sensor_left = VL53L1X.VL53L1X(i2c_bus=14, i2c_address=0x29)
         sensor_left.open()
         sensor_left.set_timing(33000, 50)
         sensor_left.start_ranging(3)  # Modus 3: Long Range
