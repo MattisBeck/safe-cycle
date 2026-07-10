@@ -178,10 +178,25 @@ def read_sentence(serial_port: SerialPort | None) -> str | None:
         return None
 
 
-def run_node(port_name: str = "/dev/ttyS0", baudrate: int = 9600) -> None:
+def find_pico_port() -> str | None:
+    """Sucht nach dem seriellen Port des angeschlossenen Raspberry Pi Pico (MicroPython).
+
+    :return: Der Pfad zum Port (z. B. '/dev/ttyACM0') oder None, falls nicht gefunden.
+    """
+    try:
+        import serial.tools.list_ports
+        for port in serial.tools.list_ports.comports():
+            if port.vid == 0x2E8A and port.pid == 0x0005:
+                return port.device
+    except ImportError:
+        pass
+    return None
+
+
+def run_node(port_name: str | None = None, baudrate: int = 9600) -> None:
     """Initialisiert das GPS-Modul und veröffentlicht die Messwerte dauerhaft.
 
-    :param port_name: Name des seriellen Ports (Standard beim Radxa: /dev/ttyS0).
+    :param port_name: Name des seriellen Ports. Wird None übergeben, wird der Pico automatisch gesucht.
     :param baudrate: Baudrate für die serielle Verbindung (Standard L76X: 9600).
     """
     try:
@@ -189,6 +204,12 @@ def run_node(port_name: str = "/dev/ttyS0", baudrate: int = 9600) -> None:
     except ImportError:
         print("Fehler: pyserial ist nicht installiert.")
         return
+
+    if port_name is None:
+        port_name = find_pico_port()
+        if port_name is None:
+            print("Pico (MicroPython) nicht gefunden. Versuche Fallback /dev/ttyACM0.")
+            port_name = "/dev/ttyACM0"
 
     mqtt = MQTTWrapper()
 
