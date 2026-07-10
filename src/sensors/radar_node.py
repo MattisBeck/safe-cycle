@@ -33,6 +33,10 @@ class SerialPort(Protocol):
         """Liest die angegebene Anzahl an Bytes."""
         ...
 
+    def read_until(self, expected: bytes = b"\n", size: int | None = None) -> bytes:
+        """Liest bis zum erwarteten Muster oder bis Timeout."""
+        ...
+
     def close(self) -> None:
         """Schließt den seriellen Port."""
         ...
@@ -115,12 +119,16 @@ def create_radar_payload(target: TargetData | None) -> RadarPayload:
             distance_cm=0.0,
             rel_speed_kmh=0.0,
             is_valid=False,
+            angle=0,
+            snr=0,
         )
     return RadarPayload(
         timestamp_ms=now_ms,
         distance_cm=target.distance_cm,
         rel_speed_kmh=target.rel_speed_kmh,
         is_valid=True,
+        angle=target.angle,
+        snr=target.snr,
     )
 
 
@@ -137,19 +145,10 @@ def read_frame(serial_port: SerialPort | None) -> bytes | None:
         return None
 
     try:
-        # 1. Warte auf Header
-        state = 0
-        while state < 4:
-            b = serial_port.read(1)
-            if not b:
-                return None
-            if b[0] == HEADER[state]:
-                state += 1
-            else:
-                if b[0] == HEADER[0]:
-                    state = 1
-                else:
-                    state = 0
+        # 1. Warte auf Header per read_until
+        header_data = serial_port.read_until(HEADER)
+        if not header_data.endswith(HEADER):
+            return None
 
         # 2. Lese Längenfeld (2 Bytes, Little Endian)
         len_bytes = serial_port.read(2)
@@ -189,7 +188,7 @@ def run_radar_node(port_name: str = "/dev/ttyHS1", baudrate: int = 115200) -> No
 
     serial_port: SerialPort | None = None
     try:
-        serial_port = serial.Serial(port_name, baudrate, timeout=0.5)
+        serial_port = serial.Serial(port_name, baudrate, timeout=0.1)
     except Exception as e:
         print(f"Radar konnte nicht initialisiert werden: {e}")
 
