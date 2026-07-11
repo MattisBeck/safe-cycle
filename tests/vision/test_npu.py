@@ -96,7 +96,7 @@ def test_preprocess_frame_for_npu_rejects_non_color_image() -> None:
 def test_extract_class_ids_after_nms_filters_scores_and_overlapping_boxes() -> None:
     """Prüft Score-Filter und Non-Maximum-Suppression."""
     scores = np.array([0.95, 0.90, 0.10], dtype=np.float32)
-    class_ids = np.array([2, 7, 5], dtype=np.float32)
+    class_ids = np.array([2, 2, 5], dtype=np.float32)
     boxes = np.array(
         [
             [0.0, 0.0, 10.0, 10.0],
@@ -109,6 +109,23 @@ def test_extract_class_ids_after_nms_filters_scores_and_overlapping_boxes() -> N
     result = npu_module.extract_class_ids_after_nms([scores, class_ids, boxes])
 
     assert result == [2]
+
+
+def test_extract_class_ids_after_nms_keeps_overlapping_boxes_of_different_classes() -> None:
+    """Prüft, dass sich verschiedene Klassen nicht gegenseitig unterdrücken."""
+    scores = np.array([0.95, 0.90], dtype=np.float32)
+    class_ids = np.array([2, 7], dtype=np.float32)
+    boxes = np.array(
+        [
+            [0.0, 0.0, 10.0, 10.0],
+            [0.2, 0.2, 10.2, 10.2],
+        ],
+        dtype=np.float32,
+    )
+
+    result = npu_module.extract_class_ids_after_nms([scores, class_ids, boxes])
+
+    assert result == [2, 7]
 
 
 def test_extract_class_ids_after_nms_rejects_incomplete_output() -> None:

@@ -133,8 +133,9 @@ def extract_class_ids_after_nms(
     filtered_class_ids = class_ids[valid_mask]
     filtered_boxes = boxes[valid_mask]
 
-    # NMS entfernt mehrere stark überlappende Boxen für dasselbe Objekt. Ohne
-    # diesen Schritt würde ein Auto oft mehrfach gezählt werden.
+    # NMS entfernt mehrere stark überlappende Boxen derselben Klasse. Boxen
+    # verschiedener Klassen bleiben erhalten, weil sie unterschiedliche Objekte
+    # darstellen können.
     selected_indices: list[int] = []
     ordered_indices = np.argsort(filtered_scores)[::-1]
     while ordered_indices.size > 0:
@@ -173,7 +174,9 @@ def extract_class_ids_after_nms(
             out=np.zeros_like(intersection_area),
             where=union_area > 0.0,
         )
-        ordered_indices = remaining_indices[iou <= iou_threshold]
+        remaining_class_ids = filtered_class_ids[remaining_indices]
+        belongs_to_other_class = remaining_class_ids != filtered_class_ids[current_index]
+        ordered_indices = remaining_indices[(iou <= iou_threshold) | belongs_to_other_class]
 
     return [int(class_id) for class_id in filtered_class_ids[selected_indices].tolist()]
 
