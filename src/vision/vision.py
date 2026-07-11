@@ -18,6 +18,7 @@ BASE_DIR = Path(__file__).resolve().parent
 MODEL_PATH = BASE_DIR / "models" / "yolov8_det.bin"
 VISION_TOPIC = "vision/vehicles"
 VIDEO_FEED_WINDOW_NAME = "Safe Cycle Live Vision"
+MAX_CAMERA_READ_FAILURES = 5
 
 VEHICLE_CLASSES = {
     2: "Car",
@@ -47,13 +48,13 @@ def detect_vehicles(image_source: npt.NDArray[Any], model: VehicleDetector) -> V
     :param model: Bereits geladenes NPU-YOLOv8-Modell.
     :return: Erkennungsergebnis für den aktuellen Frame.
     """
+    # Unix-Zeitstempel in Millisekunden generieren.
+    current_timestamp = int(time.time() * 1000)
+
     # Das Modell liefert COCO-Klassen-IDs. Safe Cycle braucht hier nur die
     # Fahrzeugklassen, weil Fußgänger oder Tiere einen normalerweise nicht überholen :).
     prediction = model.predict(image_source)
     detected_types = [VEHICLE_CLASSES[class_id] for class_id in prediction.class_ids if class_id in VEHICLE_CLASSES]
-
-    # Unix-Zeitstempel in Millisekunden generieren.
-    current_timestamp = int(time.time() * 1000)
 
     return VisionPayload(
         timestamp_ms=current_timestamp,
@@ -75,6 +76,7 @@ def run_live_vision(
     """
     capture = open_camera_capture()
     model: NpuYoloV8Model | None = None
+    mqtt_wrapper: MQTTWrapper | None = None
     window_created = False
     try:
         if show_video_feed:
@@ -83,11 +85,19 @@ def run_live_vision(
 
         model = NpuYoloV8Model(MODEL_PATH)
         mqtt_wrapper = MQTTWrapper()
+        failed_read_count = 0
 
         while stop_event is None or not stop_event.is_set():
             has_frame, frame = capture.read()
             if not has_frame or frame is None:
-                break
+                failed_read_count += 1
+                if failed_read_count >= MAX_CAMERA_READ_FAILURES:
+                    raise RuntimeError(
+                        f"Kamera lieferte nach {MAX_CAMERA_READ_FAILURES} Versuchen keinen gültigen Frame."
+                    )
+                continue
+
+            failed_read_count = 0
 
             if frame.dtype != np.uint8 or frame.ndim != 3 or frame.shape[2] != 3:
                 raise ValueError("Vision erwartet ein BGR-Farbbild mit uint8-Daten.")
@@ -101,6 +111,8 @@ def run_live_vision(
             mqtt_wrapper.publish(VISION_TOPIC, payload)
     finally:
         capture.release()
+        if mqtt_wrapper is not None:
+            mqtt_wrapper.close()
         if model is not None:
             model.release()
         if window_created:
@@ -139,4 +151,4 @@ def run_example_detection(image_directory_path: Path) -> None:
 
 
 if __name__ == "__main__":
-    run_live_vision(show_video_feed=True)
+    run_live_vision(show_video_feed=False)

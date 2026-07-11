@@ -42,11 +42,14 @@ class MQTTWrapper:
 
         # Zu jedem abonnierten Topic merken wir uns das Datenmodell und die Aktion.
         self._subscriptions: dict[str, tuple[PayloadType, Callable[[Any], None]]] = {}
+        self._closed = False
+        self._loop_started = False
 
         # Paho ruft diese Funktion automatisch auf, sobald eine Nachricht eintrifft.
         self.mqttc.on_message = self._on_message
         self.mqttc.connect(broker_ip, broker_port)
         self.mqttc.loop_start()
+        self._loop_started = True
 
     def publish(self, topic: str, payload: object) -> None:
         """Sendet eine Dataclass als JSON-Nachricht auf ein MQTT-Topic.
@@ -97,6 +100,29 @@ class MQTTWrapper:
 
         # Erst dieses Abo teilt dem Broker mit, dass wir Nachrichten wollen.
         self.mqttc.subscribe(topic)
+
+    def close(self) -> None:
+        """Schließt den MQTT-Client sauber.
+
+        Die Verbindung wird getrennt und die Hintergrundschleife danach
+        gestoppt.
+        """
+        if self._closed:
+            return
+
+        disconnect_error: Exception | None = None
+        try:
+            self.mqttc.disconnect()
+        except Exception as exc:
+            disconnect_error = exc
+        finally:
+            if self._loop_started:
+                self.mqttc.loop_stop()
+                self._loop_started = False
+            self._closed = True
+
+        if disconnect_error is not None:
+            raise disconnect_error
 
     def _on_message(self, _client: mqtt.Client, _userdata: object, msg: mqtt.MQTTMessage) -> None:
         """Verarbeitet eine eingehende MQTT-Nachricht aus dem Paho-Callback.
