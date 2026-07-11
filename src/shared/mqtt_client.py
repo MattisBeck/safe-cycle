@@ -77,6 +77,11 @@ class MQTTWrapper:
         json_string = json.dumps(payload_dict)
         self.mqttc.publish(topic, json_string)
 
+    def close(self) -> None:
+        """Beendet die MQTT-Verbindung und die Hintergrundschleife."""
+        self.mqttc.disconnect()
+        self.mqttc.loop_stop()
+
     def subscribe(self, topic: str, action: Callable[[Any], None]) -> None:
         """Abonniert ein Topic und verknüpft es mit einer Callback-Funktion.
 

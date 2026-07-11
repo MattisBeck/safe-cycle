@@ -1,0 +1,28 @@
+/* Grundlegendes Reset für Ränder und Abstände */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+/* Sicherstellen, dass die Seite den gesamten Bildschirm ausfüllt */
+html, body {
+    width: 100%;
+    height: 100%;
+    /* Eine ansprechende dunkle Hintergrundfarbe, falls die Karte noch lädt */
+    background-color: #121212; 
+    font-family: 'Inter', sans-serif;
+}
+
+/* 
+   Der Container für die Karte.
+   Nimmt 100% der Breite und Höhe des Bildschirms ein.
+*/
+#map_container {
+    width: 100vw;
+    height: 100vh;
+}
+
+.leaflet-layer {
+    filter: sepia(15%) hue-rotate(5deg) saturate(95%) contrast(105%);
+}
