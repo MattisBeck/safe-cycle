@@ -37,7 +37,7 @@ class FakeModel:
 class FakeCapture:
     """Stellt eine OpenCV-Kamera ohne Hardware nach."""
 
-    def __init__(self, frames: list[npt.NDArray[np.uint8]] | None = None, opened: bool = True) -> None:
+    def __init__(self, frames: list[npt.NDArray[np.uint8] | None] | None = None, opened: bool = True) -> None:
         """Speichert synthetische Frames und Öffnungszustand."""
         self.frames = frames if frames is not None else []
         self.opened = opened
@@ -53,7 +53,8 @@ class FakeCapture:
         self.read_calls += 1
         if not self.frames:
             return False, None
-        return True, self.frames.pop(0)
+        frame = self.frames.pop(0)
+        return frame is not None, frame
 
     def release(self) -> None:
         """Merkt sich die Freigabe der Kamera."""
@@ -68,11 +69,16 @@ class FakeMqttWrapper:
     def __init__(self) -> None:
         """Merkt sich die erzeugte Wrapper-Instanz."""
         self.published_payloads: list[tuple[str, VisionPayload]] = []
+        self.closed = False
         FakeMqttWrapper.instances.append(self)
 
     def publish(self, topic: str, payload: VisionPayload) -> None:
         """Merkt sich veröffentlichte Payloads."""
         self.published_payloads.append((topic, payload))
+
+    def close(self) -> None:
+        """Merkt sich die Freigabe des simulierten MQTT-Wrappers."""
+        self.closed = True
 
 
 def test_detect_vehicles_counts_only_relevant_vehicle_classes(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -138,6 +144,7 @@ def test_run_live_vision_publishes_payloads_and_releases_capture(monkeypatch: py
     second_frame = np.ones((1, 1, 3), dtype=np.uint8)
     capture = FakeCapture(frames=[first_frame, second_frame])
     fake_model = FakeModel(class_ids=[], inference_time_ms=1.0)
+    stop_event = threading.Event()
     created_model_paths: list[Path] = []
     opened_camera = False
     received_frames: list[npt.NDArray[np.uint8]] = []
@@ -158,6 +165,8 @@ def test_run_live_vision_publishes_payloads_and_releases_capture(monkeypatch: py
         assert model is fake_model
         received_frames.append(image_source)
         found_vehicle = bool(image_source[0, 0, 0])
+        if found_vehicle:
+            stop_event.set()
         return VisionPayload(
             timestamp_ms=1 if not found_vehicle else 2,
             found_vehicle=found_vehicle,
@@ -172,13 +181,13 @@ def test_run_live_vision_publishes_payloads_and_releases_capture(monkeypatch: py
     monkeypatch.setattr(vision_module, "detect_vehicles", fake_detect_vehicles)
     monkeypatch.setattr(vision_module, "MQTTWrapper", FakeMqttWrapper)
 
-    vision_module.run_live_vision(stop_event=threading.Event())
+    vision_module.run_live_vision(stop_event=stop_event)
 
     assert opened_camera is True
     assert created_model_paths == [vision_module.MODEL_PATH]
     assert received_frames == [first_frame, second_frame]
     assert fake_model.released is True
-    assert capture.read_calls == 3
+    assert capture.read_calls == 2
     assert capture.released is True
     assert len(FakeMqttWrapper.instances) == 1
     mqtt_wrapper = FakeMqttWrapper.instances[0]
@@ -187,6 +196,63 @@ def test_run_live_vision_publishes_payloads_and_releases_capture(monkeypatch: py
         "vision/vehicles",
     ]
     assert [payload.found_vehicle for _topic, payload in mqtt_wrapper.published_payloads] == [False, True]
+    assert mqtt_wrapper.closed is True
+
+
+def test_run_live_vision_retries_temporary_camera_read_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Prüft, dass ein kurzer Kameraaussetzer nicht sofort beendet."""
+    frame = np.ones((1, 1, 3), dtype=np.uint8)
+    capture = FakeCapture(frames=[None, None, frame])
+    fake_model = FakeModel(class_ids=[], inference_time_ms=1.0)
+    stop_event = threading.Event()
+
+    def fake_detect_vehicles(image_source: npt.NDArray[np.uint8], _model: object) -> VisionPayload:
+        """Beendet den Test nach dem ersten gültigen Frame."""
+        assert image_source is frame
+        stop_event.set()
+        return VisionPayload(
+            timestamp_ms=1,
+            found_vehicle=True,
+            detected_types=["Car"],
+            vehicle_count=1,
+            inference_time_ms=1.0,
+        )
+
+    FakeMqttWrapper.instances = []
+    monkeypatch.setattr(vision_module, "open_camera_capture", lambda: capture)
+    monkeypatch.setattr(vision_module, "NpuYoloV8Model", lambda _model_path: fake_model)
+    monkeypatch.setattr(vision_module, "detect_vehicles", fake_detect_vehicles)
+    monkeypatch.setattr(vision_module, "MQTTWrapper", FakeMqttWrapper)
+
+    vision_module.run_live_vision(stop_event=stop_event)
+
+    assert capture.read_calls == 3
+    assert capture.released is True
+    assert fake_model.released is True
+    assert len(FakeMqttWrapper.instances) == 1
+    mqtt_wrapper = FakeMqttWrapper.instances[0]
+    assert len(mqtt_wrapper.published_payloads) == 1
+    assert mqtt_wrapper.closed is True
+
+
+def test_run_live_vision_raises_after_repeated_camera_read_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Prüft den sichtbaren Fehler nach mehreren Kameraaussetzern."""
+    capture = FakeCapture(frames=[None] * vision_module.MAX_CAMERA_READ_FAILURES)
+    fake_model = FakeModel(class_ids=[], inference_time_ms=1.0)
+
+    FakeMqttWrapper.instances = []
+    monkeypatch.setattr(vision_module, "open_camera_capture", lambda: capture)
+    monkeypatch.setattr(vision_module, "NpuYoloV8Model", lambda _model_path: fake_model)
+    monkeypatch.setattr(vision_module, "MQTTWrapper", FakeMqttWrapper)
+
+    with pytest.raises(RuntimeError, match="keinen gültigen Frame"):
+        vision_module.run_live_vision(stop_event=threading.Event())
+
+    assert capture.read_calls == vision_module.MAX_CAMERA_READ_FAILURES
+    assert capture.released is True
+    assert fake_model.released is True
+    assert len(FakeMqttWrapper.instances) == 1
+    assert FakeMqttWrapper.instances[0].closed is True
 
 
 def test_run_live_vision_releases_capture_when_publish_fails(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -209,6 +275,10 @@ def test_run_live_vision_releases_capture_when_publish_fails(monkeypatch: pytest
         def publish(self, _topic: str, _payload: VisionPayload) -> None:
             """Bricht den Versand gezielt ab."""
             raise RuntimeError("MQTT kaputt")
+
+        def close(self) -> None:
+            """Simuliert ein erfolgreiches Schließen nach dem Fehler."""
+            return None
 
     monkeypatch.setattr(vision_module, "open_camera_capture", lambda: capture)
     fake_model = FakeModel(class_ids=[], inference_time_ms=1.0)
