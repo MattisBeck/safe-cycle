@@ -2,6 +2,7 @@
 
 from shared import (
     TOPIC_PAYLOAD_TYPES,
+    Coordinates,
     GpsPayload,
     ImuPayload,
     MQTTWrapper,
@@ -10,6 +11,7 @@ from shared import (
     RadarPayload,
     TimestampedPayload,
     TofPayload,
+    Violation,
     VisionPayload,
 )
 
@@ -22,6 +24,12 @@ def test_shared_exports_payload_models() -> None:
     assert TimestampedPayload.__name__ == "TimestampedPayload"
     assert TofPayload.__name__ == "TofPayload"
     assert VisionPayload.__name__ == "VisionPayload"
+
+
+def test_shared_exports_violation_models() -> None:
+    """Prüft direkte Imports der gemeinsamen Verstoßmodelle."""
+    assert Coordinates.__name__ == "Coordinates"
+    assert Violation.__name__ == "Violation"
 
 
 def test_shared_exports_mqtt_helpers() -> None:

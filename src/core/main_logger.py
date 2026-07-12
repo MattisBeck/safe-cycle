@@ -7,10 +7,20 @@ import time
 from collections import deque
 from queue import Queue
 
-from shared import TOPIC_PAYLOAD_TYPES, MQTTWrapper, PayloadInstance, TofPayload, VisionPayload
+from shared import (
+    TOPIC_PAYLOAD_TYPES,
+    Coordinates,
+    GpsPayload,
+    MQTTWrapper,
+    PayloadInstance,
+    TofPayload,
+    Violation,
+    VisionPayload,
+)
 
 UNSAFE_OVERTAKE_THRESHOLD_CM = 150
 VISION_LOOKBACK_PERIOD_MS = 3_000
+GPS_EVENT_WINDOW_MS = 3_000
 
 
 class SensorHistory:
@@ -150,3 +160,65 @@ def check_unsafe_overtake(tof_payload: TofPayload, vision_history: SensorHistory
         reference_timestamp_ms=tof_payload.timestamp_ms,
     )
     return any(isinstance(event, VisionPayload) and event.found_vehicle for event in recent_events)
+
+
+def gather_violation_data(tof_payload: TofPayload, gps_payload: GpsPayload) -> Violation:
+    """Sammelt synchronisierte Messwerte für einen Abstandsverstoß.
+
+    :param tof_payload: ToF-Messung des bereits bestätigten Verstoßes.
+    :param gps_payload: Zeitlich zugeordnete GPS-Messung.
+    :return: Daten für den späteren Eintrag in der Verstoßliste.
+    """
+    return Violation(
+        timestamp=tof_payload.timestamp_ms // 1_000,
+        coordinates=Coordinates(lat=gps_payload.latitude, lon=gps_payload.longitude),
+        distance_cm=tof_payload.distance_cm,
+        speed_kmh=gps_payload.speed_kmh,
+    )
+
+
+def get_nearest_event(history: SensorHistory, timestamp_ms: int) -> GpsPayload | None:
+    """Sucht das zeitlich nächste gültige GPS-Ereignis.
+
+    Bei gleichem zeitlichem Abstand wird das frühere Ereignis bevorzugt.
+
+    :param history: Verlauf mit möglichen GPS-Payloads.
+    :param timestamp_ms: Mittelpunkt des Suchfensters in Millisekunden.
+    :return: Nächstes gültiges GPS-Payload oder `None`.
+    """
+    candidates = [
+        event
+        for event in list(history._history)
+        if isinstance(event, GpsPayload)
+        and event.satellites_connected > 0
+        and abs(event.timestamp_ms - timestamp_ms) <= GPS_EVENT_WINDOW_MS
+    ]
+    if not candidates:
+        return None
+
+    return min(
+        candidates,
+        key=lambda event: (abs(event.timestamp_ms - timestamp_ms), event.timestamp_ms),
+    )
+
+
+def process_tof_alert(
+    tof_payload: TofPayload,
+    vision_history: SensorHistory,
+    gps_history: SensorHistory,
+) -> Violation | None:
+    """Verarbeitet einen ToF-Alarm zu einem vollständigen Verstoß.
+
+    :param tof_payload: Zu prüfender ToF-Alarm.
+    :param vision_history: Verlauf der Fahrzeugerkennung.
+    :param gps_history: Verlauf der GPS-Messungen.
+    :return: Vollständiger Verstoß oder `None` bei fehlender Bestätigung.
+    """
+    if not check_unsafe_overtake(tof_payload, vision_history):
+        return None
+
+    gps_payload = get_nearest_event(gps_history, tof_payload.timestamp_ms)
+    if gps_payload is None:
+        return None
+
+    return gather_violation_data(tof_payload, gps_payload)

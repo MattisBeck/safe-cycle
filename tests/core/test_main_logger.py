@@ -7,10 +7,21 @@ from typing import cast
 import pytest
 
 from core import main_logger
-from shared import TOPIC_PAYLOAD_TYPES, MQTTWrapper, PayloadInstance, RadarPayload, TofPayload, VisionPayload
+from shared import (
+    TOPIC_PAYLOAD_TYPES,
+    Coordinates,
+    GpsPayload,
+    MQTTWrapper,
+    PayloadInstance,
+    RadarPayload,
+    TofPayload,
+    Violation,
+    VisionPayload,
+)
 
 RADAR_TOPIC = "sensors/radar"
 VISION_TOPIC = "vision/vehicles"
+GPS_TOPIC = "sensors/gps"
 
 
 class FakeMqttWrapper:
@@ -87,6 +98,35 @@ def make_vision_history() -> main_logger.SensorHistory:
         max_items=10,
         mqtt_wrapper=cast(MQTTWrapper, mqtt_wrapper),
         topic=VISION_TOPIC,
+    )
+
+
+def make_gps_payload(
+    timestamp_ms: int,
+    *,
+    satellites_connected: int = 12,
+) -> GpsPayload:
+    """Erstellt eine GPS-Payload für die Ereigniszuordnung.
+
+    :param timestamp_ms: Unix-Zeitstempel der simulierten Messung.
+    :param satellites_connected: Anzahl der simulierten Satellitenverbindungen.
+    """
+    return GpsPayload(
+        timestamp_ms=timestamp_ms,
+        latitude=51.31275,
+        longitude=9.49245,
+        speed_kmh=22.1,
+        satellites_connected=satellites_connected,
+    )
+
+
+def make_gps_history() -> main_logger.SensorHistory:
+    """Erstellt eine brokerfreie GPS-History."""
+    mqtt_wrapper = FakeMqttWrapper()
+    return main_logger.SensorHistory(
+        max_items=10,
+        mqtt_wrapper=cast(MQTTWrapper, mqtt_wrapper),
+        topic=GPS_TOPIC,
     )
 
 
@@ -281,6 +321,133 @@ def test_check_unsafe_overtake_rejects_noncritical_tof_payloads(
     )
 
     assert main_logger.check_unsafe_overtake(tof_payload, history) is False
+
+
+def test_gather_violation_data_collects_tof_and_gps_values() -> None:
+    """Prüft die Zusammenführung eines bestätigten Verstoßes."""
+    tof_payload = make_tof_payload(timestamp_ms=1_717_618_015_999, distance_cm=85.5)
+    gps_payload = GpsPayload(
+        timestamp_ms=1_717_618_015_500,
+        latitude=51.31275,
+        longitude=9.49245,
+        speed_kmh=22.1,
+        satellites_connected=12,
+    )
+
+    violation = main_logger.gather_violation_data(tof_payload, gps_payload)
+
+    assert violation == Violation(
+        timestamp=1_717_618_015,
+        coordinates=Coordinates(lat=51.31275, lon=9.49245),
+        distance_cm=85.5,
+        speed_kmh=22.1,
+        image_path=None,
+    )
+
+
+def test_get_nearest_event_selects_smallest_absolute_difference() -> None:
+    """Prüft die GPS-Auswahl vor und nach dem Ereigniszeitpunkt."""
+    history = make_gps_history()
+    earlier_payload = make_gps_payload(timestamp_ms=8_000)
+    later_payload = make_gps_payload(timestamp_ms=10_500)
+    history._append_event(earlier_payload)
+    history._append_event(later_payload)
+
+    result = main_logger.get_nearest_event(history, timestamp_ms=10_000)
+
+    assert result == later_payload
+
+
+def test_get_nearest_event_prefers_earlier_payload_on_tie() -> None:
+    """Prüft den früheren GPS-Wert als Tie-Breaker."""
+    history = make_gps_history()
+    earlier_payload = make_gps_payload(timestamp_ms=9_000)
+    history._append_event(earlier_payload)
+    history._append_event(make_gps_payload(timestamp_ms=11_000))
+
+    assert main_logger.get_nearest_event(history, timestamp_ms=10_000) == earlier_payload
+
+
+@pytest.mark.parametrize("offset_ms", [-3_000, 3_000])
+def test_get_nearest_event_includes_window_boundaries(offset_ms: int) -> None:
+    """Prüft beide Grenzen des symmetrischen GPS-Fensters.
+
+    :param offset_ms: Abstand zum Mittelpunkt des Suchfensters.
+    """
+    history = make_gps_history()
+    boundary_payload = make_gps_payload(timestamp_ms=10_000 + offset_ms)
+    history._append_event(boundary_payload)
+
+    assert main_logger.get_nearest_event(history, timestamp_ms=10_000) == boundary_payload
+
+
+def test_get_nearest_event_skips_invalid_gps_payload() -> None:
+    """Prüft, dass ein GPS-Paket ohne Satelliten nicht ausgewählt wird."""
+    history = make_gps_history()
+    valid_payload = make_gps_payload(timestamp_ms=9_000)
+    history._append_event(valid_payload)
+    history._append_event(make_gps_payload(timestamp_ms=9_900, satellites_connected=0))
+
+    assert main_logger.get_nearest_event(history, timestamp_ms=10_000) == valid_payload
+
+
+def test_get_nearest_event_returns_none_without_valid_candidate() -> None:
+    """Prüft zu alte, typfremde und ungültige Ereignisse."""
+    history = make_gps_history()
+    history._append_event(make_gps_payload(timestamp_ms=6_999))
+    history._append_event(make_gps_payload(timestamp_ms=10_000, satellites_connected=0))
+    history._append_event(make_radar_payload(timestamp_ms=10_000))
+
+    assert main_logger.get_nearest_event(history, timestamp_ms=10_000) is None
+
+
+def test_process_tof_alert_returns_complete_violation() -> None:
+    """Prüft die Orchestrierung eines bestätigten ToF-Alarms."""
+    vision_history = make_vision_history()
+    gps_history = make_gps_history()
+    tof_payload = make_tof_payload(timestamp_ms=10_000, distance_cm=85.5)
+    vision_history._append_event(make_vision_payload(timestamp_ms=9_000, found_vehicle=True))
+    gps_history._append_event(make_gps_payload(timestamp_ms=10_500))
+
+    result = main_logger.process_tof_alert(tof_payload, vision_history, gps_history)
+
+    assert result == Violation(
+        timestamp=10,
+        coordinates=Coordinates(lat=51.31275, lon=9.49245),
+        distance_cm=85.5,
+        speed_kmh=22.1,
+        image_path=None,
+    )
+
+
+def test_process_tof_alert_returns_none_without_vision_confirmation() -> None:
+    """Prüft einen Alarm ohne bestätigte Fahrzeugerkennung."""
+    vision_history = make_vision_history()
+    gps_history = make_gps_history()
+    gps_history._append_event(make_gps_payload(timestamp_ms=10_000))
+
+    result = main_logger.process_tof_alert(
+        make_tof_payload(timestamp_ms=10_000),
+        vision_history,
+        gps_history,
+    )
+
+    assert result is None
+
+
+def test_process_tof_alert_returns_none_without_gps_payload() -> None:
+    """Prüft einen bestätigten Alarm ohne passenden GPS-Wert."""
+    vision_history = make_vision_history()
+    gps_history = make_gps_history()
+    vision_history._append_event(make_vision_payload(timestamp_ms=9_000, found_vehicle=True))
+
+    result = main_logger.process_tof_alert(
+        make_tof_payload(timestamp_ms=10_000),
+        vision_history,
+        gps_history,
+    )
+
+    assert result is None
 
 
 def test_subscribe_sensors_creates_history_for_each_known_topic() -> None:

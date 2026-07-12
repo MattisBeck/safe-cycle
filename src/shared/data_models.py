@@ -1,6 +1,7 @@
 """Gemeinsame Datenmodelle für die Kommunikation zwischen Komponenten."""
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TypeAlias
 
 
@@ -85,6 +86,35 @@ class VisionPayload(TimestampedPayload):
     vehicle_count: int
     inference_time_ms: float
 
+
+@dataclass
+class Coordinates:
+    """Geografische Position eines aufgezeichneten Ereignisses.
+
+    :param lat: Breitengrad in Dezimalgrad.
+    :param lon: Längengrad in Dezimalgrad.
+    """
+
+    lat: float
+    lon: float
+
+
+@dataclass
+class Violation:
+    """Daten eines erkannten Abstandsverstoßes.
+
+    :param timestamp: Unix-Zeitstempel des Verstoßes in Sekunden.
+    :param coordinates: Position des Verstoßes.
+    :param distance_cm: Gemessener seitlicher Abstand in Zentimetern.
+    :param speed_kmh: Geschwindigkeit des Fahrrads in Kilometern pro Stunde.
+    :param image_path: Relativer Pfad zum Beweisbild, falls bereits vorhanden.
+    """
+
+    timestamp: int
+    coordinates: Coordinates
+    distance_cm: float
+    speed_kmh: float
+    image_path: Path | None = None
 
 PayloadType: TypeAlias = (
     type[GpsPayload]

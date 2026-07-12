@@ -1,10 +1,20 @@
 """Tests für die gemeinsamen MQTT-Datenmodelle."""
 import json
 from dataclasses import asdict
+from pathlib import Path
 
 import pytest
 
-from shared.data_models import GpsPayload, ImuPayload, RadarPayload, TimestampedPayload, TofPayload, VisionPayload
+from shared.data_models import (
+    Coordinates,
+    GpsPayload,
+    ImuPayload,
+    RadarPayload,
+    TimestampedPayload,
+    TofPayload,
+    Violation,
+    VisionPayload,
+)
 
 
 def test_payloads_share_timestamp_base_class() -> None:
@@ -106,3 +116,35 @@ def test_vision_payload_is_json_compatible() -> None:
     serialized = json.loads(json.dumps(asdict(payload)))
 
     assert serialized == asdict(payload)
+
+
+def test_violation_matches_agreed_data_structure() -> None:
+    """Prüft die vereinbarte verschachtelte Struktur eines Verstoßes."""
+    violation = Violation(
+        timestamp=1_717_618_015,
+        coordinates=Coordinates(lat=51.31275, lon=9.49245),
+        distance_cm=85.5,
+        speed_kmh=22.1,
+    )
+
+    assert asdict(violation) == {
+        "timestamp": 1_717_618_015,
+        "coordinates": {"lat": 51.31275, "lon": 9.49245},
+        "distance_cm": 85.5,
+        "speed_kmh": 22.1,
+        "image_path": None,
+    }
+
+
+def test_violation_accepts_relative_image_path() -> None:
+    """Prüft einen später ergänzten relativen Bildpfad."""
+    image_path = Path("images/violations/auto_id_5_1717618015.jpg")
+    violation = Violation(
+        timestamp=1_717_618_015,
+        coordinates=Coordinates(lat=51.31275, lon=9.49245),
+        distance_cm=85.5,
+        speed_kmh=22.1,
+        image_path=image_path,
+    )
+
+    assert violation.image_path == image_path
