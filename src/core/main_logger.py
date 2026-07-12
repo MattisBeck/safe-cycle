@@ -7,7 +7,10 @@ import time
 from collections import deque
 from queue import Queue
 
-from shared import TOPIC_PAYLOAD_TYPES, MQTTWrapper, PayloadInstance, TofPayload
+from shared import TOPIC_PAYLOAD_TYPES, MQTTWrapper, PayloadInstance, TofPayload, VisionPayload
+
+UNSAFE_OVERTAKE_THRESHOLD_CM = 150
+VISION_LOOKBACK_PERIOD_MS = 3_000
 
 
 class SensorHistory:
@@ -36,7 +39,12 @@ class SensorHistory:
         """
         self._history.append(payload)
 
-    def get_events(self, lookback_period_ms: int) -> list[PayloadInstance]:
+    def get_events(
+        self,
+        lookback_period_ms: int,
+        *,
+        reference_timestamp_ms: int | None = None,
+    ) -> list[PayloadInstance]:
         """Gibt aktuelle Events aus dem angegebenen Zeitfenster zurück.
 
         Die Liste ist von neu nach alt sortiert.
@@ -46,12 +54,17 @@ class SensorHistory:
             liefert `get_events(1_000)` die ersten beiden Events.
 
         :param lookback_period_ms: Zeitspanne, die in die Vergangenheit geschaut wird.
+        :param reference_timestamp_ms: Optionaler Bezugszeitpunkt statt der aktuellen Zeit.
         :return: Passende Events, sortiert von neu nach alt.
         """
-        events = []
-        current_unix_time_ms = int(time.time() * 1000)
+        events: list[PayloadInstance] = []
+        if reference_timestamp_ms is None:
+            reference_timestamp_ms = int(time.time() * 1000)
+
         for payload_event in reversed(self._history):
-            time_difference = current_unix_time_ms - payload_event.timestamp_ms
+            time_difference = reference_timestamp_ms - payload_event.timestamp_ms
+            if time_difference < 0:
+                continue
             if time_difference <= lookback_period_ms:
                 events.append(payload_event)
             else:
@@ -94,18 +107,18 @@ class TofHistory(SensorHistory):
         super()._append_event(payload)
         if not isinstance(payload, TofPayload):
             raise TypeError("Payload für TofHistory muss eine TofPayload sein.")
-        if payload.distance_cm < 150:
+        if payload.distance_cm < UNSAFE_OVERTAKE_THRESHOLD_CM:
             self._alert_queue.put(payload)
 
 
-def subscribe_sensors(max_items: int, mqtt_wrapper: MQTTWrapper) -> dict[str, SensorHistory]:
+def subscribe_topics(max_items: int, mqtt_wrapper: MQTTWrapper) -> dict[str, SensorHistory]:
     """Abonniert alle bekannten MQTT-Topics und legt je Topic einen Ringpuffer an.
 
     :param max_items: Maximale Anzahl gespeicherter Nachrichten je Topic.
     :param mqtt_wrapper: MQTT-Wrapper für die Abonnements.
     :return: Verläufe, adressiert über ihr MQTT-Topic.
     """
-    subscribed_sensors: dict[str, SensorHistory] = {}
+    subscribed_topics: dict[str, SensorHistory] = {}
     for topic in TOPIC_PAYLOAD_TYPES.keys():
         # Spezialfall für TofSensor
         history: SensorHistory
@@ -118,13 +131,22 @@ def subscribe_sensors(max_items: int, mqtt_wrapper: MQTTWrapper) -> dict[str, Se
             )
         else:
             history = SensorHistory(max_items=max_items, mqtt_wrapper=mqtt_wrapper, topic=topic)
-        subscribed_sensors[topic] = history
-    return subscribed_sensors
+        subscribed_topics[topic] = history
+    return subscribed_topics
 
 
-def check_unsafe_overtake() -> bool:
-    """Platzhalter für die spätere Erkennung kritischer Überholvorgänge.
+def check_unsafe_overtake(tof_payload: TofPayload, vision_history: SensorHistory) -> bool:
+    """Prüft eine Abstandsunterschreitung auf ein erkanntes Fahrzeug.
 
-    :raises NotImplementedError: Bis die Ereignislogik implementiert ist.
+    :param tof_payload: ToF-Messung als zeitlicher Bezugspunkt.
+    :param vision_history: Verlauf der Vision-Payloads.
+    :return: `True`, wenn Abstand und Fahrzeugerkennung zusammenpassen.
     """
-    raise NotImplementedError("Not implemented yet....")
+    if not tof_payload.is_valid or tof_payload.distance_cm >= UNSAFE_OVERTAKE_THRESHOLD_CM:
+        return False
+
+    recent_events = vision_history.get_events(
+        VISION_LOOKBACK_PERIOD_MS,
+        reference_timestamp_ms=tof_payload.timestamp_ms,
+    )
+    return any(isinstance(event, VisionPayload) and event.found_vehicle for event in recent_events)

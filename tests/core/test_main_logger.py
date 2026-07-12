@@ -7,9 +7,10 @@ from typing import cast
 import pytest
 
 from core import main_logger
-from shared import TOPIC_PAYLOAD_TYPES, MQTTWrapper, PayloadInstance, RadarPayload
+from shared import TOPIC_PAYLOAD_TYPES, MQTTWrapper, PayloadInstance, RadarPayload, TofPayload, VisionPayload
 
 RADAR_TOPIC = "sensors/radar"
+VISION_TOPIC = "vision/vehicles"
 
 
 class FakeMqttWrapper:
@@ -46,6 +47,46 @@ def make_radar_payload(timestamp_ms: int) -> RadarPayload:
         distance_cm=420.0,
         rel_speed_kmh=18.5,
         is_valid=True,
+    )
+
+
+def make_vision_payload(timestamp_ms: int, *, found_vehicle: bool) -> VisionPayload:
+    """Erstellt eine Vision-Payload für die Überholprüfung.
+
+    :param timestamp_ms: Unix-Zeitstempel der simulierten Erkennung.
+    :param found_vehicle: Gibt an, ob ein Fahrzeug erkannt wurde.
+    """
+    return VisionPayload(
+        timestamp_ms=timestamp_ms,
+        found_vehicle=found_vehicle,
+        detected_types=["Car"] if found_vehicle else [],
+        vehicle_count=1 if found_vehicle else 0,
+        inference_time_ms=12.5,
+    )
+
+
+def make_tof_payload(
+    timestamp_ms: int,
+    *,
+    distance_cm: float = 100.0,
+    is_valid: bool = True,
+) -> TofPayload:
+    """Erstellt eine ToF-Payload für die Überholprüfung.
+
+    :param timestamp_ms: Unix-Zeitstempel der simulierten Messung.
+    :param distance_cm: Gemessener seitlicher Abstand.
+    :param is_valid: Gibt an, ob die Messung gültig ist.
+    """
+    return TofPayload(timestamp_ms=timestamp_ms, distance_cm=distance_cm, is_valid=is_valid)
+
+
+def make_vision_history() -> main_logger.SensorHistory:
+    """Erstellt eine brokerfreie Vision-History."""
+    mqtt_wrapper = FakeMqttWrapper()
+    return main_logger.SensorHistory(
+        max_items=10,
+        mqtt_wrapper=cast(MQTTWrapper, mqtt_wrapper),
+        topic=VISION_TOPIC,
     )
 
 
@@ -160,11 +201,93 @@ def test_get_events_stops_when_newest_payload_is_too_old(monkeypatch: pytest.Mon
     assert history.get_events(lookback_period_ms=1_000) == []
 
 
+def test_get_events_uses_reference_timestamp_and_ignores_later_events() -> None:
+    """Prüft ein Zeitfenster relativ zu einem historischen Ereignis."""
+    history = make_vision_history()
+    boundary_payload = make_vision_payload(timestamp_ms=7_000, found_vehicle=True)
+    recent_payload = make_vision_payload(timestamp_ms=9_500, found_vehicle=False)
+    later_payload = make_vision_payload(timestamp_ms=10_001, found_vehicle=True)
+    history._append_event(boundary_payload)
+    history._append_event(recent_payload)
+    history._append_event(later_payload)
+
+    events = history.get_events(3_000, reference_timestamp_ms=10_000)
+
+    assert events == [recent_payload, boundary_payload]
+
+
+def test_check_unsafe_overtake_returns_true_for_recent_vehicle() -> None:
+    """Prüft eine Abstandsunterschreitung mit vorheriger Fahrzeugerkennung."""
+    history = make_vision_history()
+    history._append_event(make_vision_payload(timestamp_ms=9_000, found_vehicle=True))
+
+    result = main_logger.check_unsafe_overtake(make_tof_payload(timestamp_ms=10_000), history)
+
+    assert result is True
+
+
+@pytest.mark.parametrize(
+    ("vision_timestamp_ms", "found_vehicle"),
+    [(6_999, True), (9_000, False), (10_001, True)],
+)
+def test_check_unsafe_overtake_rejects_unmatched_vision_events(
+    vision_timestamp_ms: int,
+    found_vehicle: bool,
+) -> None:
+    """Prüft zu alte, negative und spätere Fahrzeugerkennungen.
+
+    :param vision_timestamp_ms: Zeitstempel der Vision-Payload.
+    :param found_vehicle: Simuliertes Erkennungsergebnis.
+    """
+    history = make_vision_history()
+    history._append_event(
+        make_vision_payload(timestamp_ms=vision_timestamp_ms, found_vehicle=found_vehicle)
+    )
+
+    result = main_logger.check_unsafe_overtake(make_tof_payload(timestamp_ms=10_000), history)
+
+    assert result is False
+
+
+def test_check_unsafe_overtake_includes_lookback_boundary() -> None:
+    """Prüft eine Fahrzeugerkennung exakt auf der Zeitfenstergrenze."""
+    history = make_vision_history()
+    history._append_event(make_vision_payload(timestamp_ms=7_000, found_vehicle=True))
+
+    result = main_logger.check_unsafe_overtake(make_tof_payload(timestamp_ms=10_000), history)
+
+    assert result is True
+
+
+@pytest.mark.parametrize(
+    ("distance_cm", "is_valid"),
+    [(150.0, True), (151.0, True), (100.0, False)],
+)
+def test_check_unsafe_overtake_rejects_noncritical_tof_payloads(
+    distance_cm: float,
+    is_valid: bool,
+) -> None:
+    """Prüft sichere Abstände und ungültige ToF-Messungen.
+
+    :param distance_cm: Simulierter seitlicher Abstand.
+    :param is_valid: Simulierter Gültigkeitszustand.
+    """
+    history = make_vision_history()
+    history._append_event(make_vision_payload(timestamp_ms=9_000, found_vehicle=True))
+    tof_payload = make_tof_payload(
+        timestamp_ms=10_000,
+        distance_cm=distance_cm,
+        is_valid=is_valid,
+    )
+
+    assert main_logger.check_unsafe_overtake(tof_payload, history) is False
+
+
 def test_subscribe_sensors_creates_history_for_each_known_topic() -> None:
     """Prüft, dass alle bekannten Topics einen eigenen Verlauf bekommen."""
     mqtt_wrapper = FakeMqttWrapper()
 
-    histories = main_logger.subscribe_sensors(
+    histories = main_logger.subscribe_topics(
         max_items=2,
         mqtt_wrapper=cast(MQTTWrapper, mqtt_wrapper),
     )
@@ -177,7 +300,7 @@ def test_subscribe_sensors_creates_history_for_each_known_topic() -> None:
 def test_subscribe_sensors_passes_max_items_to_histories() -> None:
     """Prüft, dass alle Verläufe die gewünschte Puffergröße verwenden."""
     mqtt_wrapper = FakeMqttWrapper()
-    histories = main_logger.subscribe_sensors(
+    histories = main_logger.subscribe_topics(
         max_items=1,
         mqtt_wrapper=cast(MQTTWrapper, mqtt_wrapper),
     )
