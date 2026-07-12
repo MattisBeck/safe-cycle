@@ -79,11 +79,22 @@ Die vollständige Einrichtung ist in den
 [Radxa-Softwareabhängigkeiten](hardware_docs/RADXA_SOFTWARE_DEPENDENCIES.md)
 beschrieben.
 
-Nach abgeschlossener Einrichtung wird die NPU-Umgebung geladen und das
-Vision-Modul gestartet:
+Nach abgeschlossener Einrichtung können alle implementierten Sensoren und das
+Vision-Modul gemeinsam gestartet werden. Der lokale MQTT-Broker muss vorher
+erreichbar sein:
 
 ```bash
-source ./start_npu.sh
+docker compose up -d mqtt
+./run_safe_cycle.sh
+```
+
+Das Startskript bleibt als Supervisor im Vordergrund. `Ctrl+C` beendet alle
+gestarteten Module sauber. Vor dem Start zeigt es den geladenen OpenCV-Pfad und
+die GStreamer-Buildzeile an; ohne `GStreamer: YES` bricht es ab. Soll nur das
+Vision-Modul gestartet werden, wird die NPU-Umgebung separat geladen:
+
+```bash
+source ./src/vision/start_npu.sh
 UV_CACHE_DIR=/tmp/safe-cycle-uv-cache PYTHONPATH=src uv run --no-sync --no-dev python -m vision
 ```
 
