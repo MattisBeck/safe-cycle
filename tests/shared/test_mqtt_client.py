@@ -29,6 +29,8 @@ class FakeMqttClient:
         self.callback_api_version = callback_api_version
         self.connected_to: tuple[str, int] | None = None
         self.loop_started = False
+        self.disconnected = False
+        self.operations: list[str] = []
         self.published_messages: list[tuple[str, str]] = []
         self.subscribed_topics: list[str] = []
         self.on_message: Callable[[mqtt.Client, object, mqtt.MQTTMessage], None] | None = None
@@ -45,6 +47,17 @@ class FakeMqttClient:
     def loop_start(self) -> None:
         """Merkt sich, dass die MQTT-Netzwerkschleife gestartet wurde."""
         self.loop_started = True
+        self.operations.append("loop_start")
+
+    def loop_stop(self) -> None:
+        """Merkt sich, dass die MQTT-Netzwerkschleife gestoppt wurde."""
+        self.loop_started = False
+        self.operations.append("loop_stop")
+
+    def disconnect(self) -> None:
+        """Merkt sich, dass die simulierte Broker-Verbindung getrennt wurde."""
+        self.disconnected = True
+        self.operations.append("disconnect")
 
     def publish(self, topic: str, payload: str) -> None:
         """Merkt sich veröffentlichte Nachrichten.
@@ -96,6 +109,51 @@ def test_wrapper_connects_client_and_starts_loop(monkeypatch: pytest.MonkeyPatch
     assert client.connected_to == ("127.0.0.1", 1883)
     assert client.loop_started is True
     assert client.on_message == wrapper._on_message
+
+
+def test_close_disconnects_before_stopping_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Prüft die saubere Reihenfolge beim Schließen."""
+    wrapper, client = create_wrapper_with_fake_client(monkeypatch)
+
+    wrapper.close()
+
+    assert client.disconnected is True
+    assert client.loop_started is False
+    assert client.operations == ["loop_start", "disconnect", "loop_stop"]
+
+
+def test_close_can_be_called_multiple_times(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Prüft, dass mehrfaches Schließen keine zweite Aktion auslöst."""
+    wrapper, client = create_wrapper_with_fake_client(monkeypatch)
+
+    wrapper.close()
+    wrapper.close()
+
+    assert client.operations == ["loop_start", "disconnect", "loop_stop"]
+
+
+def test_close_stops_loop_when_disconnect_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Prüft, dass ein Disconnect-Fehler die Schleife nicht offen lässt."""
+
+    class FailingDisconnectClient(FakeMqttClient):
+        """Simuliert einen Fehler beim Trennen der Broker-Verbindung."""
+
+        def disconnect(self) -> None:
+            """Bricht das simulierte Trennen gezielt ab."""
+            self.operations.append("disconnect")
+            raise RuntimeError("Disconnect kaputt")
+
+    FakeMqttClient.last_instance = None
+    monkeypatch.setattr(mqtt, "Client", FailingDisconnectClient)
+    wrapper = MQTTWrapper("127.0.0.1", 1883)
+    client = FakeMqttClient.last_instance
+
+    assert client is not None
+    with pytest.raises(RuntimeError, match="Disconnect kaputt"):
+        wrapper.close()
+
+    assert client.loop_started is False
+    assert client.operations == ["loop_start", "disconnect", "loop_stop"]
 
 
 def test_wrapper_uses_config_defaults(monkeypatch: pytest.MonkeyPatch) -> None:

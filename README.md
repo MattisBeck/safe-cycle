@@ -19,10 +19,14 @@ Die Sensoren übernehmen getrennte Aufgaben:
 - **IMU:** Erfasst Beschleunigungswerte und schafft die Grundlage für spätere
   Funktionen wie eine Sturzerkennung.
 
-Die Komponenten sollen später über MQTT lose gekoppelt kommunizieren. Gemeinsame
-Python-`dataclasses` definieren dafür einheitliche Datenformate. Die zentrale
-Logik synchronisiert Sensordaten mit Kamerabildern und erzeugt Fahrtenprotokolle
-für das Post-Ride-Dashboard.
+Die Komponenten kommunizieren lose gekoppelt über MQTT. Gemeinsame
+Python-`dataclasses` definieren dafür einheitliche Datenformate. Das Vision-Modul
+erkennt Fahrzeuge mit YOLOv8 auf der Qualcomm-NPU und veröffentlicht die
+Ergebnisse ebenfalls über MQTT. Objekt-Tracking ist für eine spätere
+Ausbaustufe vorgesehen und noch nicht Teil des MVP.
+
+Die zentrale Logik synchronisiert Sensor- und Kameradaten und erzeugt
+Fahrtenprotokolle für das Post-Ride-Dashboard.
 
 ## Ordnerstruktur
 
@@ -32,7 +36,7 @@ safe-cycle/
 ├── hardware_docs/       # Schaltpläne, Konstruktion und Hardware-Notizen
 ├── src/
 │   ├── sensors/         # Anbindung von Radar, ToF, GPS und IMU
-│   ├── vision/          # Kamera, YOLO-Inferenz, Tracking und KI-Modelle
+│   ├── vision/          # Kamera, NPU-basierte YOLOv8-Inferenz und KI-Modelle
 │   ├── core/            # Synchronisierung, Ereignislogik und Logging
 │   ├── dashboard/       # Lokale Auswertung nach einer Fahrt
 │   └── shared/          # Gemeinsame Datenmodelle und Hilfsfunktionen
@@ -47,17 +51,40 @@ safe-cycle/
 ## Setup
 
 Voraussetzung sind [`uv`](https://docs.astral.sh/uv/) sowie Docker mit Docker Compose. Die
-Entwicklungsumgebung und alle Abhängigkeiten werden aus der Projektkonfiguration
-installiert:
+Entwicklungsumgebung und die allgemeinen Abhängigkeiten werden aus der
+Projektkonfiguration installiert:
 
 ```bash
 uv sync
+```
+
+Für die Entwicklung des Vision-Moduls auf einem Desktop-System wird zusätzlich
+OpenCV installiert:
+
+```bash
+uv sync --extra desktop-vision
 ```
 
 Der MQTT-Broker wird anschließend mit Docker Compose gestartet:
 
 ```bash
 docker compose up -d
+```
+
+## Vision auf dem Radxa starten
+
+Der Betrieb auf dem Radxa Dragon Q6A benötigt das lokal bereitgestellte
+QNN-Modell, die Qualcomm-Laufzeit und ein OpenCV mit GStreamer-Unterstützung.
+Die vollständige Einrichtung ist in den
+[Radxa-Softwareabhängigkeiten](hardware_docs/RADXA_SOFTWARE_DEPENDENCIES.md)
+beschrieben.
+
+Nach abgeschlossener Einrichtung wird die NPU-Umgebung geladen und das
+Vision-Modul gestartet:
+
+```bash
+source ./start_npu.sh
+UV_CACHE_DIR=/tmp/safe-cycle-uv-cache PYTHONPATH=src uv run --no-sync --no-dev python -m vision
 ```
 
 ## Tests

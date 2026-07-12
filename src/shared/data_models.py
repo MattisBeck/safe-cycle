@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 
 
-@dataclass
+@dataclass(frozen=True)
 class TofPayload:
     """Messwert eines seitlich montierten ToF-Sensors.
 
@@ -17,7 +17,7 @@ class TofPayload:
     is_valid: bool
 
 
-@dataclass
+@dataclass(frozen=True)
 class RadarPayload:
     """Messwert des rückwärts gerichteten Radars.
 
@@ -37,7 +37,7 @@ class RadarPayload:
     snr: int
 
 
-@dataclass
+@dataclass(frozen=True)
 class GpsPayload:
     """Positions- und Geschwindigkeitsdaten des GPS-Moduls.
 
@@ -55,7 +55,7 @@ class GpsPayload:
     satellites_connected: int
 
 
-@dataclass
+@dataclass(frozen=True)
 class ImuPayload:
     """Beschleunigungsdaten der inertialen Messeinheit.
 
@@ -71,7 +71,7 @@ class ImuPayload:
     accel_z: float
 
 
-@dataclass
+@dataclass(frozen=True)
 class VisionPayload:
     """Ergebnisse der YOLO-Fahrzeugerkennung im aktuellen Frame.
 
