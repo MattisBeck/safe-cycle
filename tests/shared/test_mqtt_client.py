@@ -176,6 +176,8 @@ def test_publish_serializes_payload_as_json(monkeypatch: pytest.MonkeyPatch) -> 
         distance_cm=420.0,
         rel_speed_kmh=18.5,
         is_valid=True,
+        angle=0,
+        snr=0,
     )
 
     wrapper.publish(RADAR_TOPIC, payload)
@@ -193,6 +195,8 @@ def test_publish_rejects_unknown_topic(monkeypatch: pytest.MonkeyPatch) -> None:
         distance_cm=420.0,
         rel_speed_kmh=18.5,
         is_valid=True,
+        angle=0,
+        snr=0,
     )
 
     with pytest.raises(TypeError, match="nicht gefunden"):
@@ -262,6 +266,8 @@ def test_on_message_deserializes_payload_and_calls_action(monkeypatch: pytest.Mo
         distance_cm=420.0,
         rel_speed_kmh=18.5,
         is_valid=True,
+        angle=0,
+        snr=0,
     )
 
     def collect_payload(received_payload: RadarPayload) -> None:

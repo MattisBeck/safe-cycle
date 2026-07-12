@@ -14,7 +14,8 @@ PayloadType: TypeAlias = (
 
 TOPIC_PAYLOAD_TYPES: dict[str, PayloadType] = {
     "sensors/radar": RadarPayload,
-    "sensors/tof": TofPayload,
+    "sensors/tof/left": TofPayload,
+    "sensors/tof/right": TofPayload,
     "sensors/gps": GpsPayload,
     "sensors/imu": ImuPayload,
     "vision/vehicles": VisionPayload,

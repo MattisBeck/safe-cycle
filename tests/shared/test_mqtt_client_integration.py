@@ -35,6 +35,8 @@ def test_wrapper_publishes_and_receives_radar_payload() -> None:
         distance_cm=420.0,
         rel_speed_kmh=18.5,
         is_valid=True,
+        angle=0,
+        snr=0,
     )
 
     def mark_subscription_ready(

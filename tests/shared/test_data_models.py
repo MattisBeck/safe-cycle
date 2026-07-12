@@ -36,6 +36,8 @@ def test_radar_payload_preserves_relative_speed(rel_speed_kmh: float) -> None:
         distance_cm=420.0,
         rel_speed_kmh=rel_speed_kmh,
         is_valid=True,
+        angle=0,
+        snr=0,
     )
 
     serialized = json.loads(json.dumps(asdict(payload)))

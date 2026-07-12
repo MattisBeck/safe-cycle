@@ -25,12 +25,16 @@ class RadarPayload:
     :param distance_cm: Entfernung des erkannten Fahrzeugs in Zentimetern.
     :param rel_speed_kmh: Relative Geschwindigkeit gegenüber dem Fahrrad.
     :param is_valid: Gibt an, ob das Radar einen verwertbaren Wert geliefert hat.
+    :param angle: Winkel des erkannten Fahrzeugs.
+    :param snr: Signal-Rausch-Verhältnis des erkannten Fahrzeugs.
     """
 
     timestamp_ms: int
     distance_cm: float
     rel_speed_kmh: float
     is_valid: bool
+    angle: int
+    snr: int
 
 
 @dataclass(frozen=True)
