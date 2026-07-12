@@ -200,7 +200,7 @@ class NpuYoloV8Model:
 
         qnn_sdk_root = os.environ.get("QNN_SDK_ROOT")
         if qnn_sdk_root is None:
-            raise RuntimeError("QNN_SDK_ROOT ist nicht gesetzt. Lade zuerst 'source ./start_npu.sh'.")
+            raise RuntimeError("QNN_SDK_ROOT ist nicht gesetzt. Lade zuerst 'source ./src/vision/start_npu.sh'.")
 
         if not self.model_path.is_file():
             raise RuntimeError(f"NPU-Modell wurde nicht gefunden: {self.model_path}")

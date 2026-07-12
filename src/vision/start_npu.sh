@@ -2,18 +2,18 @@
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     echo "Fehler: Dieses Script muss mit 'source' geladen werden." >&2
-    echo "Beispiel: source ./start_npu.sh" >&2
+    echo "Beispiel: source ./src/vision/start_npu.sh" >&2
     exit 1
 fi
 
-SAFE_CYCLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." >/dev/null 2>&1 && pwd)"
 
 export QAIRT_VERSION="${QAIRT_VERSION:-2.42.0.251225}"
 export PRODUCT_SOC="${PRODUCT_SOC:-6490}"
 export DSP_ARCH="${DSP_ARCH:-68}"
 
-QAIRT_DIR="${QAIRT_DIR:-$SAFE_CYCLE_DIR/Qualcomm/qairt/$QAIRT_VERSION}"
-APPBUILDER_DIR="${APPBUILDER_DIR:-$SAFE_CYCLE_DIR/Qualcomm/ai-engine-direct-helper}"
+QAIRT_DIR="${QAIRT_DIR:-$PROJECT_ROOT/Qualcomm/qairt/$QAIRT_VERSION}"
+APPBUILDER_DIR="${APPBUILDER_DIR:-$PROJECT_ROOT/Qualcomm/ai-engine-direct-helper}"
 
 if [[ ! -d "$QAIRT_DIR" ]]; then
     echo "Fehler: QAIRT wurde nicht gefunden:" >&2

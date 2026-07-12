@@ -6,11 +6,11 @@ Ausgabe als MQTT-`VisionPayload`.
 
 ## Ziel
 
-Am Ende soll dieser Befehl auf dem Radxa laufen:
+Am Ende soll dieser Befehl auf dem Radxa alle implementierten Sensoren und das
+Vision-Modul starten:
 
 ```bash
-source ./start_npu.sh
-UV_CACHE_DIR=/tmp/safe-cycle-uv-cache PYTHONPATH=src uv run --no-sync --no-dev python -m vision.vision
+./run_safe_cycle.sh
 ```
 
 `--no-sync` ist wichtig: `uv run` darf kurz vor dem Start keine Pakete ändern,
@@ -85,7 +85,7 @@ Wenn dort `GStreamer: NO` steht, nutzt Python das falsche OpenCV.
 NPU-Variablen in der aktuellen Shell laden:
 
 ```bash
-source ./start_npu.sh
+source ./src/vision/start_npu.sh
 ```
 
 Danach muss `qai_appbuilder` in der Safe-Cycle-`.venv` installiert werden. Der
@@ -115,14 +115,14 @@ Dieser Test verarbeitet kein Kamerabild. Er prüft nur, ob das Safe-Cycle-Modell
 über Qualcomm AppBuilder eine Inferenz auf der NPU starten kann:
 
 ```bash
-source ./start_npu.sh
+source ./src/vision/start_npu.sh
 PYTHONPATH=src .venv/bin/python -c "import numpy as np; from vision.vision import MODEL_PATH; from vision.npu import NpuYoloV8Model; model = NpuYoloV8Model(MODEL_PATH); print(model.predict(np.zeros((640, 640, 3), dtype=np.uint8))); model.release()"
 ```
 
 Eine leere Szene darf `class_ids=[]` liefern. Wichtig ist, dass keine
 `qai_appbuilder`-, `QNN_SDK_ROOT`- oder Modellpfad-Fehlermeldung kommt.
 
-## 5. Vision-Modul starten
+## 5. Safe Cycle starten
 
 MQTT-Broker starten:
 
@@ -130,11 +130,24 @@ MQTT-Broker starten:
 docker compose up -d mqtt
 ```
 
-Vision starten:
+Alle implementierten Sensoren und Vision/NPU gemeinsam starten:
 
 ```bash
-source ./start_npu.sh
-UV_CACHE_DIR=/tmp/safe-cycle-uv-cache PYTHONPATH=src uv run --no-sync --no-dev python -m vision.vision
+./run_safe_cycle.sh
+```
+
+Das Skript prüft vorab, ob der Broker erreichbar ist und ob die `.venv` das
+System-OpenCV mit `GStreamer: YES` lädt. Erst danach lädt es die
+NPU-Umgebung und bleibt als Supervisor im Vordergrund. `Ctrl+C` sendet ein
+Stoppsignal an alle Module und wartet darauf, dass MQTT-Verbindungen, serielle
+Ports, ToF-Messungen, Kamera und NPU freigegeben wurden.
+
+Ein einzeln im Vordergrund gestartetes Modul wird ebenfalls mit `Ctrl+C`
+beendet. Falls man das Vision-Modul separat starten will, kann man folgenden Befehl nutzen:
+
+```bash
+source ./src/vision/start_npu.sh
+UV_CACHE_DIR=/tmp/safe-cycle-uv-cache PYTHONPATH=src uv run --no-sync --no-dev python -m vision
 ```
 
 Payloads in einem zweiten Terminal mitschneiden:
