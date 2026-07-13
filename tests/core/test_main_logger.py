@@ -62,6 +62,8 @@ def make_radar_payload(timestamp_ms: int) -> RadarPayload:
         distance_cm=420.0,
         rel_speed_kmh=18.5,
         is_valid=True,
+        angle=0,
+        snr=0,
     )
 
 

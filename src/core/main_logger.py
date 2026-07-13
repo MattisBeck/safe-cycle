@@ -429,9 +429,9 @@ def subscribe_topics(
     )
     subscribed_topics: dict[str, SensorHistory] = {}
     for topic in TOPIC_PAYLOAD_TYPES.keys():
-        # Spezialfall für TofSensor
+        # Beide seitlichen ToF-Topics speisen dieselbe Alarm-Queue.
         history: SensorHistory
-        if topic == "sensors/tof":
+        if TOPIC_PAYLOAD_TYPES[topic] is TofPayload:
             history = TofHistory(
                 max_items=max_items,
                 mqtt_wrapper=mqtt_wrapper,

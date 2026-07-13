@@ -5,10 +5,17 @@ description = "Erfassung und Auswertung kritischer Überholvorgänge bei Fahrrä
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "numpy>=2.5.0",
-    "opencv-python>=4.13.0.92",
+    "adafruit-blinka>=9.1.0",
+    "vl53l1x>=0.0.6; sys_platform == 'linux'",
+    "adafruit-extended-bus>=1.0.2",
+    "numpy>=1.26,<2",
     "paho-mqtt==2.1.0",
-    "ultralytics>=8.4.68",
+    "pyserial>=3.5",
+]
+
+[project.optional-dependencies]
+desktop-vision = [
+    "opencv-python>=4.6,<4.12",
 ]
 
 [dependency-groups]
@@ -17,6 +24,7 @@ dev = [
     "pytest>=9.0.3",
     "pytest-mock>=3.15.1",
     "ruff>=0.15.16",
+    "types-pyserial>=3.5.0.20260519",
 ]
 
 [tool.pytest.ini_options]
@@ -40,3 +48,7 @@ mypy_path = "src"
 explicit_package_bases = true
 strict = true
 warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = ["cv2", "VL53L1X", "serial"]
+ignore_missing_imports = true

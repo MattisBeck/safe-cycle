@@ -97,7 +97,7 @@ def test_orchestrator_processes_alert_after_gps_window() -> None:
         max_history_items=20,
     )
     mqtt_wrapper.emit("vision/vehicles", make_vision_payload(timestamp_ms=9_000))
-    mqtt_wrapper.emit("sensors/tof", make_tof_payload(timestamp_ms=10_000))
+    mqtt_wrapper.emit("sensors/tof/left", make_tof_payload(timestamp_ms=10_000))
     mqtt_wrapper.emit("sensors/gps", make_gps_payload(timestamp_ms=10_500))
 
     assert orchestrator.process_pending(current_timestamp_ms=12_999) == 0
@@ -120,7 +120,7 @@ def test_orchestrator_finish_flushes_immature_alert() -> None:
         max_history_items=20,
     )
     mqtt_wrapper.emit("vision/vehicles", make_vision_payload(timestamp_ms=9_000))
-    mqtt_wrapper.emit("sensors/tof", make_tof_payload(timestamp_ms=10_000))
+    mqtt_wrapper.emit("sensors/tof/right", make_tof_payload(timestamp_ms=10_000))
     mqtt_wrapper.emit("sensors/gps", make_gps_payload(timestamp_ms=10_500))
 
     ride_data = orchestrator.finish(end_timestamp_ms=11_000)
@@ -141,8 +141,8 @@ def test_orchestrator_tof_queue_does_not_block_at_history_limit() -> None:
     mqtt_wrapper.emit("vision/vehicles", make_vision_payload(timestamp_ms=9_000))
     mqtt_wrapper.emit("sensors/gps", make_gps_payload(timestamp_ms=10_000))
 
-    mqtt_wrapper.emit("sensors/tof", make_tof_payload(timestamp_ms=10_000))
-    mqtt_wrapper.emit("sensors/tof", make_tof_payload(timestamp_ms=10_100))
+    mqtt_wrapper.emit("sensors/tof/left", make_tof_payload(timestamp_ms=10_000))
+    mqtt_wrapper.emit("sensors/tof/right", make_tof_payload(timestamp_ms=10_100))
     ride_data = orchestrator.finish(end_timestamp_ms=11_000)
 
     assert len(ride_data.violations) == 2
@@ -166,7 +166,7 @@ def test_run_ride_writes_complete_json_and_closes_mqtt(tmp_path: Path) -> None:
         )
         assert mqtt_wrapper.all_topics_subscribed.wait(timeout=5)
         mqtt_wrapper.emit("vision/vehicles", make_vision_payload(timestamp_ms=9_000))
-        mqtt_wrapper.emit("sensors/tof", make_tof_payload(timestamp_ms=10_000))
+        mqtt_wrapper.emit("sensors/tof/left", make_tof_payload(timestamp_ms=10_000))
         mqtt_wrapper.emit("sensors/gps", make_gps_payload(timestamp_ms=10_500))
         stop_event.set()
         output_path = future.result(timeout=5)

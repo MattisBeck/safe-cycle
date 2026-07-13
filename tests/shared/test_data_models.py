@@ -9,21 +9,28 @@ from shared.data_models import (
     Coordinates,
     GpsPayload,
     ImuPayload,
+    PayloadInstance,
     RadarPayload,
     RideData,
     RoutePoint,
-    TimestampedPayload,
     TofPayload,
     Violation,
     VisionPayload,
 )
 
 
-def test_payloads_share_timestamp_base_class() -> None:
+def test_payloads_share_timestamp_field() -> None:
     """Prüft, dass alle Payloads den gemeinsamen Zeitstempel-Vertrag erfüllen."""
-    payloads = [
+    payloads: list[PayloadInstance] = [
         TofPayload(timestamp_ms=1, distance_cm=85.5, is_valid=True),
-        RadarPayload(timestamp_ms=1, distance_cm=420.0, rel_speed_kmh=18.5, is_valid=True),
+        RadarPayload(
+            timestamp_ms=1,
+            distance_cm=420.0,
+            rel_speed_kmh=18.5,
+            is_valid=True,
+            angle=0,
+            snr=0,
+        ),
         GpsPayload(timestamp_ms=1, latitude=51.3127, longitude=9.4924, speed_kmh=22.1, satellites_connected=12),
         ImuPayload(timestamp_ms=1, accel_x=0.1, accel_y=-0.2, accel_z=9.81),
         VisionPayload(
@@ -36,7 +43,6 @@ def test_payloads_share_timestamp_base_class() -> None:
     ]
 
     for payload in payloads:
-        assert isinstance(payload, TimestampedPayload)
         assert asdict(payload)["timestamp_ms"] == 1
 
 
@@ -69,6 +75,8 @@ def test_radar_payload_preserves_relative_speed(rel_speed_kmh: float) -> None:
         distance_cm=420.0,
         rel_speed_kmh=rel_speed_kmh,
         is_valid=True,
+        angle=0,
+        snr=0,
     )
 
     serialized = json.loads(json.dumps(asdict(payload)))
