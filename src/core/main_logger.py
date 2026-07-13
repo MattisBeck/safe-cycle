@@ -1,14 +1,28 @@
-"""Zentrale Synchronisierung und Protokollierung einer Fahrt.
+"""Zentrale Synchronisierung und Orchestrierung einer aufgezeichneten Fahrt.
 
-MQTT-Abonnements, Ereignislogik, Ringpuffer und Dateiausgabe werden in späteren
-Feature-Branches implementiert. Die Bildverarbeitung bleibt im Vision-Paket.
+Während einer Fahrt laufen zwei Abläufe gleichzeitig:
+
+1. Paho-MQTT empfängt Nachrichten in einem Hintergrundthread und ruft die
+   abonnierten Callback-Funktionen auf.
+2. `run_ride` läuft in der eigentlichen Fahrt-Schleife und wertet regelmäßig
+   gesammelte Nachrichten aus.
+
+Histories speichern die zuletzt empfangenen Sensordaten. Queues übergeben
+einzelne Alarme sicher vom MQTT-Hintergrundthread an die Fahrt-Schleife.
+Locks verhindern, dass beide Abläufe denselben veränderlichen Zustand zur
+gleichen Zeit lesen und schreiben.
 """
 import time
 from collections import deque
+from collections.abc import Callable, Mapping
 from datetime import datetime
-from queue import Queue
+from pathlib import Path
+from queue import Empty, Queue
+from threading import Event, Lock
+from typing import TypeAlias
 from zoneinfo import ZoneInfo
 
+from core.ride_writer import write_ride_data
 from shared import (
     TOPIC_PAYLOAD_TYPES,
     Coordinates,
@@ -27,6 +41,8 @@ VISION_LOOKBACK_PERIOD_MS = 3_000
 GPS_EVENT_WINDOW_MS = 3_000
 RIDE_TIME_ZONE = ZoneInfo("Europe/Berlin")
 
+PayloadAction: TypeAlias = Callable[[PayloadInstance], None]
+
 
 class SensorHistory:
     """Sammelt Nachrichten eines MQTT-Topics in einem Ringpuffer.
@@ -36,15 +52,32 @@ class SensorHistory:
     :param topic: MQTT-Topic, dessen Nachrichten gesammelt werden.
     """
 
-    def __init__(self, max_items: int, mqtt_wrapper: MQTTWrapper, *, topic: str) -> None:
+    def __init__(
+        self,
+        max_items: int,
+        mqtt_wrapper: MQTTWrapper,
+        *,
+        topic: str,
+        event_action: PayloadAction | None = None,
+    ) -> None:
         """Abonniert ein Topic und erstellt den zugehörigen Ringpuffer.
 
         :param max_items: Maximale Anzahl gespeicherter Nachrichten.
         :param mqtt_wrapper: MQTT-Wrapper für das Topic-Abonnement.
         :param topic: MQTT-Topic, dessen Nachrichten gesammelt werden.
+        :param event_action: Optionale Aktion nach dem Speichern einer Nachricht.
         """
         self._history: deque[PayloadInstance] = deque(maxlen=max_items)
+
+        # MQTT fügt im Hintergrund neue Payloads hinzu, während die Fahrt-Schleife
+        # möglicherweise gerade daraus liest. Der Lock erlaubt immer nur einem
+        # dieser Abläufe gleichzeitig den Zugriff auf den Ringpuffer.
+        self._history_lock = Lock()
+        self._event_action = event_action
         self.mqtt_wrapper = mqtt_wrapper
+
+        # Der MQTT-Wrapper ruft `_append_event` später automatisch im
+        # Paho-Hintergrundthread auf, sobald eine Nachricht für das Topic eintrifft.
         self.mqtt_wrapper.subscribe(topic, self._append_event)
 
     def _append_event(self, payload: PayloadInstance) -> None:
@@ -52,7 +85,22 @@ class SensorHistory:
 
         :param payload: Empfangene Sensornachricht.
         """
-        self._history.append(payload)
+        # Der Lock wird nur für das eigentliche Anhängen gehalten. Die optionale
+        # Folgeaktion läuft danach, damit MQTT nicht unnötig lange ausgesperrt wird.
+        with self._history_lock:
+            self._history.append(payload)
+        if self._event_action is not None:
+            self._event_action(payload)
+
+    def snapshot(self) -> list[PayloadInstance]:
+        """Gibt eine threadsichere Kopie des aktuellen Verlaufs zurück.
+
+        Die Kopie ist ein kurzer, unveränderter Blick auf den aktuellen Stand.
+        Nach dem Kopieren darf MQTT sofort weiter in den Ringpuffer schreiben,
+        während die Fahrt-Schleife die zurückgegebene Liste in Ruhe auswertet.
+        """
+        with self._history_lock:
+            return list(self._history)
 
     def get_events(
         self,
@@ -76,7 +124,9 @@ class SensorHistory:
         if reference_timestamp_ms is None:
             reference_timestamp_ms = int(time.time() * 1000)
 
-        for payload_event in reversed(self._history):
+        # Auf dem Snapshot kann ohne Lock gefiltert werden. Neue MQTT-Nachrichten
+        # landen parallel in der History und werden im nächsten Aufruf berücksichtigt.
+        for payload_event in reversed(self.snapshot()):
             time_difference = reference_timestamp_ms - payload_event.timestamp_ms
             if time_difference < 0:
                 continue
@@ -103,6 +153,7 @@ class TofHistory(SensorHistory):
         alert_queue: Queue[TofPayload],
         *,
         topic: str,
+        event_action: PayloadAction | None = None,
     ) -> None:
         """Abonniert ein ToF-Topic und speichert die Alert-Queue.
 
@@ -110,8 +161,17 @@ class TofHistory(SensorHistory):
         :param mqtt_wrapper: MQTT-Wrapper für das Topic-Abonnement.
         :param alert_queue: Queue für kritische ToF-Payloads.
         :param topic: MQTT-Topic, dessen Nachrichten gesammelt werden.
+        :param event_action: Optionale Aktion nach dem Speichern einer Nachricht.
         """
-        super().__init__(max_items, mqtt_wrapper, topic=topic)
+        super().__init__(
+            max_items,
+            mqtt_wrapper,
+            topic=topic,
+            event_action=event_action,
+        )
+
+        # `Queue` ist für die Übergabe zwischen Threads gedacht: MQTT legt den
+        # Alarm hinein, die Fahrt-Schleife holt ihn später wieder heraus.
         self._alert_queue = alert_queue
 
     def _append_event(self, payload: PayloadInstance) -> None:
@@ -205,13 +265,168 @@ class RideSession:
             raise ValueError("Die Fahrt wurde bereits beendet.")
 
 
-def subscribe_topics(max_items: int, mqtt_wrapper: MQTTWrapper) -> dict[str, SensorHistory]:
+class RideOrchestrator:
+    """Verbindet MQTT-Historien mit dem Zustand einer laufenden Fahrt.
+
+    MQTT sammelt fortlaufend GPS-, Vision- und ToF-Daten. Der Orchestrator
+    übernimmt daraus GPS-Punkte für die Route und hält kritische ToF-Messungen
+    zunächst zurück. Erst nach Ablauf des GPS-Zeitfensters entscheidet er, ob
+    aus einer Messung ein vollständiger Abstandsverstoß wird.
+    """
+
+    def __init__(
+        self,
+        start_timestamp_ms: int,
+        mqtt_wrapper: MQTTWrapper,
+        *,
+        max_history_items: int,
+    ) -> None:
+        """Startet eine Session und richtet alle Topic-Historien ein.
+
+        :param start_timestamp_ms: Unix-Startzeit der Fahrt in Millisekunden.
+        :param mqtt_wrapper: MQTT-Wrapper für die Topic-Abonnements.
+        :param max_history_items: Maximale Anzahl Payloads je History.
+        """
+        # GPS-Payloads kommen im MQTT-Hintergrundthread an. `process_pending`
+        # und `finish` laufen dagegen in der Fahrt-Schleife. Dieser Lock schützt
+        # die gemeinsam verwendete RideSession und die Pending-Liste.
+        self._lock = Lock()
+        self._session = RideSession.start(start_timestamp_ms)
+
+        # Pending bedeutet: Der ToF-Alarm ist bekannt, aber das symmetrische
+        # GPS-Fenster von aktuell drei Sekunden ist noch nicht vollständig abgelaufen.
+        self._pending_tof_alerts: list[TofPayload] = []
+
+        # Diese Queue darf den MQTT-Callback beim Fahrtende niemals blockieren.
+        # Deshalb hat sie bewusst keine maximale Größe. Normalerweise wird sie
+        # alle 50 ms geleert, sodass sie nur sehr kurz Payloads enthält.
+        self._tof_alert_queue: Queue[TofPayload] = Queue()
+        self._is_finished = False
+        self._histories = subscribe_topics(
+            max_items=max_history_items,
+            mqtt_wrapper=mqtt_wrapper,
+            topic_actions={"sensors/gps": self._record_gps_payload},
+            tof_alert_queue=self._tof_alert_queue,
+        )
+
+    def process_pending(self, current_timestamp_ms: int) -> int:
+        """Verarbeitet ToF-Alarme mit vollständig abgelaufenem GPS-Fenster.
+
+        :param current_timestamp_ms: Aktuelle Unix-Zeit in Millisekunden.
+        :return: Anzahl neu hinzugefügter Verstöße.
+        :raises ValueError: Wenn die Fahrt bereits beendet wurde.
+        """
+        with self._lock:
+            self._ensure_active()
+
+            # Zuerst werden alle seit dem letzten Durchlauf von MQTT empfangenen
+            # Alarme in die lokale Pending-Liste übernommen.
+            self._drain_tof_alert_queue()
+
+            # Ein Alarm ist erst reif, wenn auch GPS-Pakete bis aktuell drei Sekunden
+            # nach seinem Messzeitpunkt hätten eintreffen können.
+            ready_alerts = [
+                alert
+                for alert in self._pending_tof_alerts
+                if alert.timestamp_ms + GPS_EVENT_WINDOW_MS <= current_timestamp_ms
+            ]
+            self._pending_tof_alerts = [
+                alert
+                for alert in self._pending_tof_alerts
+                if alert.timestamp_ms + GPS_EVENT_WINDOW_MS > current_timestamp_ms
+            ]
+
+            # Reife Alarme werden aus der Pending-Liste entfernt und genau in
+            # diesem Durchlauf ausgewertet. So entsteht kein Verstoß doppelt.
+            return self._process_alerts(ready_alerts)
+
+    def finish(self, end_timestamp_ms: int) -> RideData:
+        """Verarbeitet offene Alarme und beendet die Fahrt.
+
+        MQTT muss vor diesem Aufruf beendet werden, damit keine neuen Payloads
+        während des finalen Flushs eintreffen.
+
+        :param end_timestamp_ms: Unix-Endzeit der Fahrt in Millisekunden.
+        :return: Vollständige Daten der abgeschlossenen Fahrt.
+        :raises ValueError: Wenn die Fahrt bereits beendet wurde.
+        """
+        with self._lock:
+            self._ensure_active()
+
+            # `run_ride` hat MQTT vor diesem Aufruf bereits geschlossen. Daher
+            # können beim Leeren keine neuen Payloads mehr dazwischenkommen.
+            self._drain_tof_alert_queue()
+
+            # Beim Fahrtende warten wir nicht weitere drei Sekunden. Alle noch
+            # offenen Alarme werden mit den bereits vorhandenen Daten geprüft.
+            self._process_alerts(self._pending_tof_alerts)
+            self._pending_tof_alerts = []
+            ride_data = self._session.finish(end_timestamp_ms)
+            self._is_finished = True
+            return ride_data
+
+    def _record_gps_payload(self, payload: PayloadInstance) -> None:
+        """Übernimmt ein GPS-Payload aus dem MQTT-Hintergrundthread in die Route."""
+        if not isinstance(payload, GpsPayload):
+            raise TypeError("Das GPS-Topic muss eine GpsPayload liefern.")
+        with self._lock:
+            if not self._is_finished:
+                self._session.add_gps_payload(payload)
+
+    def _drain_tof_alert_queue(self) -> None:
+        """Überführt alle empfangenen ToF-Alarme in die Pending-Liste.
+
+        `get_nowait` wartet nicht auf eine neue Nachricht. Die Exception `Empty`
+        ist hier kein Fehler, sondern das normale Signal, dass die Queue für
+        diesen Verarbeitungszyklus vollständig geleert wurde.
+        """
+        while True:
+            try:
+                self._pending_tof_alerts.append(self._tof_alert_queue.get_nowait())
+            except Empty:
+                return
+
+    def _process_alerts(self, alerts: list[TofPayload]) -> int:
+        """Prüft Alarme und fügt bestätigte Verstöße zur Session hinzu."""
+        vision_history = self._histories["vision/vehicles"]
+        gps_history = self._histories["sensors/gps"]
+        added_violations = 0
+
+        for alert in alerts:
+            # Diese Funktion verbindet die drei fachlichen Schritte: Vision
+            # bestätigen, nächstes GPS suchen und Violation-Daten erzeugen.
+            violation = process_tof_alert(alert, vision_history, gps_history)
+            if violation is not None:
+                self._session.add_violation(violation)
+                added_violations += 1
+
+        return added_violations
+
+    def _ensure_active(self) -> None:
+        """Verhindert Verarbeitung nach dem Fahrtabschluss."""
+        if self._is_finished:
+            raise ValueError("Die Fahrt wurde bereits beendet.")
+
+
+def subscribe_topics(
+    max_items: int,
+    mqtt_wrapper: MQTTWrapper,
+    *,
+    topic_actions: Mapping[str, PayloadAction] | None = None,
+    tof_alert_queue: Queue[TofPayload] | None = None,
+) -> dict[str, SensorHistory]:
     """Abonniert alle bekannten MQTT-Topics und legt je Topic einen Ringpuffer an.
 
     :param max_items: Maximale Anzahl gespeicherter Nachrichten je Topic.
     :param mqtt_wrapper: MQTT-Wrapper für die Abonnements.
+    :param topic_actions: Optionale Aktionen für empfangene Topic-Payloads.
+    :param tof_alert_queue: Optional vorgegebene Queue für kritische ToF-Payloads.
     :return: Verläufe, adressiert über ihr MQTT-Topic.
     """
+    actions = topic_actions if topic_actions is not None else {}
+    alert_queue = (
+        tof_alert_queue if tof_alert_queue is not None else Queue(maxsize=max_items)
+    )
     subscribed_topics: dict[str, SensorHistory] = {}
     for topic in TOPIC_PAYLOAD_TYPES.keys():
         # Spezialfall für TofSensor
@@ -221,10 +436,16 @@ def subscribe_topics(max_items: int, mqtt_wrapper: MQTTWrapper) -> dict[str, Sen
                 max_items=max_items,
                 mqtt_wrapper=mqtt_wrapper,
                 topic=topic,
-                alert_queue=Queue(maxsize=max_items),
+                alert_queue=alert_queue,
+                event_action=actions.get(topic),
             )
         else:
-            history = SensorHistory(max_items=max_items, mqtt_wrapper=mqtt_wrapper, topic=topic)
+            history = SensorHistory(
+                max_items=max_items,
+                mqtt_wrapper=mqtt_wrapper,
+                topic=topic,
+                event_action=actions.get(topic),
+            )
         subscribed_topics[topic] = history
     return subscribed_topics
 
@@ -272,7 +493,7 @@ def get_nearest_event(history: SensorHistory, timestamp_ms: int) -> GpsPayload |
     """
     candidates = [
         event
-        for event in list(history._history)
+        for event in history.snapshot()
         if isinstance(event, GpsPayload)
         and event.satellites_connected > 0
         and abs(event.timestamp_ms - timestamp_ms) <= GPS_EVENT_WINDOW_MS
@@ -306,3 +527,53 @@ def process_tof_alert(
         return None
 
     return gather_violation_data(tof_payload, gps_payload)
+
+
+def current_time_ms() -> int:
+    """Gibt die aktuelle Unix-Zeit in Millisekunden zurück."""
+    return int(time.time() * 1_000)
+
+
+def run_ride(
+    mqtt_wrapper: MQTTWrapper,
+    output_directory: Path,
+    stop_event: Event,
+    *,
+    max_history_items: int = 1_000,
+    poll_interval_s: float = 0.05,
+    clock_ms: Callable[[], int] = current_time_ms,
+) -> Path:
+    """Orchestriert eine vollständige Fahrt bis zur JSON-Ausgabe.
+
+    Die Funktion übernimmt die Ownership des MQTT-Wrappers und schließt ihn
+    bei normalem Ende sowie bei Fehlern.
+
+    :param mqtt_wrapper: Bereits verbundener MQTT-Wrapper.
+    :param output_directory: Zielverzeichnis für abgeschlossene Fahrten.
+    :param stop_event: Signal zum Beenden der laufenden Fahrt.
+    :param max_history_items: Maximale Anzahl Payloads je Topic-History.
+    :param poll_interval_s: Wartezeit zwischen zwei Verarbeitungszyklen.
+    :param clock_ms: Injizierbare Uhr mit Unix-Zeit in Millisekunden.
+    :return: Pfad der geschriebenen Fahrtdatei.
+    """
+    try:
+        orchestrator = RideOrchestrator(
+            start_timestamp_ms=clock_ms(),
+            mqtt_wrapper=mqtt_wrapper,
+            max_history_items=max_history_items,
+        )
+
+        # `Event` ist ein threadsicheres Stoppsignal. Solange es nicht gesetzt
+        # ist, wartet die Schleife höchstens `poll_interval_s` und verarbeitet
+        # danach die inzwischen gereiften ToF-Alarme.
+        while not stop_event.wait(poll_interval_s):
+            orchestrator.process_pending(clock_ms())
+    finally:
+        # `finally` wird auch bei Exceptions und Ctrl+C ausgeführt. MQTT muss
+        # sicher gestoppt werden, damit kein Hintergrund-Callback weiterläuft.
+        mqtt_wrapper.close()
+
+    # Erst nach dem MQTT-Stopp werden letzte Alarme ausgewertet. Danach ist die
+    # Fahrt vollständig und kann mit genau einem Dateizugriff gespeichert werden.
+    ride_data = orchestrator.finish(clock_ms())
+    return write_ride_data(ride_data, output_directory)
