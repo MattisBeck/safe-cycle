@@ -9,6 +9,8 @@ from shared import (
     PayloadInstance,
     PayloadType,
     RadarPayload,
+    RideData,
+    RoutePoint,
     TimestampedPayload,
     TofPayload,
     Violation,
@@ -30,6 +32,8 @@ def test_shared_exports_violation_models() -> None:
     """Prüft direkte Imports der gemeinsamen Verstoßmodelle."""
     assert Coordinates.__name__ == "Coordinates"
     assert Violation.__name__ == "Violation"
+    assert RideData.__name__ == "RideData"
+    assert RoutePoint.__name__ == "RoutePoint"
 
 
 def test_shared_exports_mqtt_helpers() -> None:

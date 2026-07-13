@@ -5,7 +5,9 @@ Feature-Branches implementiert. Die Bildverarbeitung bleibt im Vision-Paket.
 """
 import time
 from collections import deque
+from datetime import datetime
 from queue import Queue
+from zoneinfo import ZoneInfo
 
 from shared import (
     TOPIC_PAYLOAD_TYPES,
@@ -13,6 +15,8 @@ from shared import (
     GpsPayload,
     MQTTWrapper,
     PayloadInstance,
+    RideData,
+    RoutePoint,
     TofPayload,
     Violation,
     VisionPayload,
@@ -21,6 +25,7 @@ from shared import (
 UNSAFE_OVERTAKE_THRESHOLD_CM = 150
 VISION_LOOKBACK_PERIOD_MS = 3_000
 GPS_EVENT_WINDOW_MS = 3_000
+RIDE_TIME_ZONE = ZoneInfo("Europe/Berlin")
 
 
 class SensorHistory:
@@ -119,6 +124,85 @@ class TofHistory(SensorHistory):
             raise TypeError("Payload für TofHistory muss eine TofPayload sein.")
         if payload.distance_cm < UNSAFE_OVERTAKE_THRESHOLD_CM:
             self._alert_queue.put(payload)
+
+
+class RideSession:
+    """Sammelt Route und Verstöße einer laufenden Fahrt im Speicher."""
+
+    def __init__(self, start_timestamp_ms: int) -> None:
+        """Erstellt eine aktive Fahrt mit festem Startzeitpunkt.
+
+        :param start_timestamp_ms: Unix-Startzeit der Fahrt in Millisekunden.
+        """
+        start_datetime = datetime.fromtimestamp(start_timestamp_ms / 1_000, tz=RIDE_TIME_ZONE)
+        self._ride_id = start_datetime.strftime("tour_%Y_%m_%d_%H%M")
+        self._start_timestamp_ms = start_timestamp_ms
+        self._route_logs: list[RoutePoint] = []
+        self._violations: list[Violation] = []
+        self._is_finished = False
+
+    @classmethod
+    def start(cls, start_timestamp_ms: int) -> "RideSession":
+        """Startet eine neue Fahrt.
+
+        :param start_timestamp_ms: Unix-Startzeit der Fahrt in Millisekunden.
+        :return: Aktive Fahrt zum Sammeln von Messwerten.
+        """
+        return cls(start_timestamp_ms)
+
+    def add_gps_payload(self, gps_payload: GpsPayload) -> bool:
+        """Fügt ein gültiges GPS-Paket zur gefahrenen Route hinzu.
+
+        :param gps_payload: Zu speichernde GPS-Messung.
+        :return: `True`, wenn die Messung aufgenommen wurde.
+        :raises ValueError: Wenn die Fahrt bereits beendet wurde.
+        """
+        self._ensure_active()
+        if gps_payload.satellites_connected <= 0:
+            return False
+
+        self._route_logs.append(
+            RoutePoint(
+                timestamp=gps_payload.timestamp_ms // 1_000,
+                lat=gps_payload.latitude,
+                lon=gps_payload.longitude,
+            )
+        )
+        return True
+
+    def add_violation(self, violation: Violation) -> None:
+        """Fügt einen bestätigten Abstandsverstoß zur Fahrt hinzu.
+
+        :param violation: Vollständiger Abstandsverstoß.
+        :raises ValueError: Wenn die Fahrt bereits beendet wurde.
+        """
+        self._ensure_active()
+        self._violations.append(violation)
+
+    def finish(self, end_timestamp_ms: int) -> RideData:
+        """Beendet die Fahrt und gibt ihre vollständigen Daten zurück.
+
+        :param end_timestamp_ms: Unix-Endzeit der Fahrt in Millisekunden.
+        :return: Vollständige Daten der abgeschlossenen Fahrt.
+        :raises ValueError: Bei ungültiger Endzeit oder bereits beendeter Fahrt.
+        """
+        self._ensure_active()
+        if end_timestamp_ms < self._start_timestamp_ms:
+            raise ValueError("Die Endzeit darf nicht vor der Startzeit liegen.")
+
+        self._is_finished = True
+        return RideData(
+            ride_id=self._ride_id,
+            start_time=self._start_timestamp_ms // 1_000,
+            end_time=end_timestamp_ms // 1_000,
+            route_logs=list(self._route_logs),
+            violations=list(self._violations),
+        )
+
+    def _ensure_active(self) -> None:
+        """Verhindert Änderungen an einer bereits beendeten Fahrt."""
+        if self._is_finished:
+            raise ValueError("Die Fahrt wurde bereits beendet.")
 
 
 def subscribe_topics(max_items: int, mqtt_wrapper: MQTTWrapper) -> dict[str, SensorHistory]:

@@ -10,6 +10,8 @@ from shared.data_models import (
     GpsPayload,
     ImuPayload,
     RadarPayload,
+    RideData,
+    RoutePoint,
     TimestampedPayload,
     TofPayload,
     Violation,
@@ -148,3 +150,36 @@ def test_violation_accepts_relative_image_path() -> None:
     )
 
     assert violation.image_path == image_path
+
+
+def test_ride_data_matches_agreed_data_structure() -> None:
+    """Prüft die vereinbarte Struktur einer abgeschlossenen Fahrt."""
+    violation = Violation(
+        timestamp=1_717_618_015,
+        coordinates=Coordinates(lat=51.31275, lon=9.49245),
+        distance_cm=85.5,
+        speed_kmh=22.1,
+    )
+    ride_data = RideData(
+        ride_id="tour_2026_06_05_1430",
+        start_time=1_717_618_000,
+        end_time=1_717_625_000,
+        route_logs=[RoutePoint(timestamp=1_717_618_010, lat=51.3127, lon=9.4924)],
+        violations=[violation],
+    )
+
+    assert asdict(ride_data) == {
+        "ride_id": "tour_2026_06_05_1430",
+        "start_time": 1_717_618_000,
+        "end_time": 1_717_625_000,
+        "route_logs": [{"timestamp": 1_717_618_010, "lat": 51.3127, "lon": 9.4924}],
+        "violations": [
+            {
+                "timestamp": 1_717_618_015,
+                "coordinates": {"lat": 51.31275, "lon": 9.49245},
+                "distance_cm": 85.5,
+                "speed_kmh": 22.1,
+                "image_path": None,
+            }
+        ],
+    }

@@ -116,6 +116,39 @@ class Violation:
     speed_kmh: float
     image_path: Path | None = None
 
+
+@dataclass
+class RoutePoint:
+    """Aufgezeichneter Punkt einer gefahrenen Route.
+
+    :param timestamp: Unix-Zeitstempel des Routenpunkts in Sekunden.
+    :param lat: Breitengrad in Dezimalgrad.
+    :param lon: Längengrad in Dezimalgrad.
+    """
+
+    timestamp: int
+    lat: float
+    lon: float
+
+
+@dataclass
+class RideData:
+    """Vollständige Daten einer abgeschlossenen Fahrt.
+
+    :param ride_id: Kennung der Fahrt aus ihrem lokalen Startzeitpunkt.
+    :param start_time: Unix-Startzeit der Fahrt in Sekunden.
+    :param end_time: Unix-Endzeit der Fahrt in Sekunden.
+    :param route_logs: Aufgezeichnete Punkte der gefahrenen Route.
+    :param violations: Während der Fahrt erkannte Abstandsverstöße.
+    """
+
+    ride_id: str
+    start_time: int
+    end_time: int
+    route_logs: list[RoutePoint]
+    violations: list[Violation]
+
+
 PayloadType: TypeAlias = (
     type[GpsPayload]
     | type[ImuPayload]

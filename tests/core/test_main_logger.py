@@ -2,7 +2,9 @@
 
 import time
 from collections.abc import Callable
+from datetime import datetime
 from typing import cast
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -14,6 +16,8 @@ from shared import (
     MQTTWrapper,
     PayloadInstance,
     RadarPayload,
+    RideData,
+    RoutePoint,
     TofPayload,
     Violation,
     VisionPayload,
@@ -448,6 +452,92 @@ def test_process_tof_alert_returns_none_without_gps_payload() -> None:
     )
 
     assert result is None
+
+
+def test_ride_session_collects_route_and_violation() -> None:
+    """Prüft den vollständigen In-Memory-Fahrtzustand."""
+    start_datetime = datetime(2026, 6, 5, 14, 30, tzinfo=ZoneInfo("Europe/Berlin"))
+    start_timestamp_ms = int(start_datetime.timestamp() * 1_000)
+    session = main_logger.RideSession.start(start_timestamp_ms)
+    first_gps = make_gps_payload(timestamp_ms=start_timestamp_ms + 1_500)
+    second_gps = GpsPayload(
+        timestamp_ms=start_timestamp_ms + 2_999,
+        latitude=51.3128,
+        longitude=9.4925,
+        speed_kmh=23.0,
+        satellites_connected=10,
+    )
+    violation = Violation(
+        timestamp=start_timestamp_ms // 1_000 + 2,
+        coordinates=Coordinates(lat=51.31275, lon=9.49245),
+        distance_cm=85.5,
+        speed_kmh=22.1,
+    )
+
+    assert session.add_gps_payload(first_gps) is True
+    assert session.add_gps_payload(second_gps) is True
+    session.add_violation(violation)
+    ride_data = session.finish(start_timestamp_ms + 5_999)
+
+    assert ride_data == RideData(
+        ride_id="tour_2026_06_05_1430",
+        start_time=start_timestamp_ms // 1_000,
+        end_time=start_timestamp_ms // 1_000 + 5,
+        route_logs=[
+            RoutePoint(
+                timestamp=start_timestamp_ms // 1_000 + 1,
+                lat=51.31275,
+                lon=9.49245,
+            ),
+            RoutePoint(
+                timestamp=start_timestamp_ms // 1_000 + 2,
+                lat=51.3128,
+                lon=9.4925,
+            ),
+        ],
+        violations=[violation],
+    )
+
+
+def test_ride_session_ignores_gps_without_satellites() -> None:
+    """Prüft, dass eine ungültige GPS-Messung nicht zur Route gehört."""
+    session = main_logger.RideSession.start(start_timestamp_ms=10_000)
+
+    was_added = session.add_gps_payload(
+        make_gps_payload(timestamp_ms=11_000, satellites_connected=0)
+    )
+    ride_data = session.finish(end_timestamp_ms=12_000)
+
+    assert was_added is False
+    assert ride_data.route_logs == []
+
+
+def test_ride_session_rejects_end_before_start() -> None:
+    """Prüft eine Endzeit vor dem Fahrtbeginn."""
+    session = main_logger.RideSession.start(start_timestamp_ms=10_000)
+
+    with pytest.raises(ValueError, match="Endzeit"):
+        session.finish(end_timestamp_ms=9_999)
+
+
+def test_ride_session_rejects_changes_after_finish() -> None:
+    """Prüft, dass eine abgeschlossene Fahrt unveränderlich bleibt."""
+    session = main_logger.RideSession.start(start_timestamp_ms=10_000)
+    session.finish(end_timestamp_ms=12_000)
+
+    with pytest.raises(ValueError, match="bereits beendet"):
+        session.finish(end_timestamp_ms=13_000)
+    with pytest.raises(ValueError, match="bereits beendet"):
+        session.add_gps_payload(make_gps_payload(timestamp_ms=13_000))
+    with pytest.raises(ValueError, match="bereits beendet"):
+        session.add_violation(
+            Violation(
+                timestamp=13,
+                coordinates=Coordinates(lat=51.31275, lon=9.49245),
+                distance_cm=85.5,
+                speed_kmh=22.1,
+            )
+        )
 
 
 def test_subscribe_sensors_creates_history_for_each_known_topic() -> None:
