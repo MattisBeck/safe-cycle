@@ -1,9 +1,9 @@
 """Tests für die JSON-Ausgabe abgeschlossener Fahrten."""
 
 import json
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from threading import Event
 
 import pytest
 
@@ -189,8 +189,8 @@ def test_write_ride_data_does_not_publish_empty_json(
     :param tmp_path: Temporäres Testverzeichnis.
     :param monkeypatch: Pytest-Helfer zum Pausieren des finalen Ersetzens.
     """
-    replace_started = Event()
-    continue_replace = Event()
+    replace_started = threading.Event()
+    continue_replace = threading.Event()
     original_replace = Path.replace
 
     def paused_replace(source: Path, target: Path) -> Path:

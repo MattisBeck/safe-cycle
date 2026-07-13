@@ -1,10 +1,12 @@
 """Tests für die äußerste Orchestrierung einer Fahrt."""
 
 import json
+import signal
+import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from threading import Event
+from types import FrameType
 from typing import cast
 
 import pytest
@@ -26,7 +28,7 @@ class FakeMqttWrapper:
     def __init__(self) -> None:
         """Erstellt leere Abonnements und Zustandssignale."""
         self.subscriptions: dict[str, Callable[[PayloadInstance], None]] = {}
-        self.all_topics_subscribed = Event()
+        self.all_topics_subscribed = threading.Event()
         self.closed = False
 
     def subscribe(self, topic: str, action: Callable[[PayloadInstance], None]) -> None:
@@ -148,18 +150,29 @@ def test_orchestrator_tof_queue_does_not_block_at_history_limit() -> None:
     assert len(ride_data.violations) == 2
 
 
-def test_run_ride_writes_complete_json_and_closes_mqtt(tmp_path: Path) -> None:
+def test_run_ride_writes_complete_json_and_closes_mqtt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Prüft den vollständigen Ablauf der äußersten Fahrtfunktion.
 
     :param tmp_path: Temporäres Ausgabeverzeichnis.
     """
     mqtt_wrapper = FakeMqttWrapper()
-    stop_event = Event()
+    stop_event = threading.Event()
+    mqtt_wrapper_creations = 0
+
+    def create_mqtt_wrapper() -> MQTTWrapper:
+        """Liefert den brokerfreien Wrapper und zählt seine Erzeugung."""
+        nonlocal mqtt_wrapper_creations
+        mqtt_wrapper_creations += 1
+        return cast(MQTTWrapper, mqtt_wrapper)
+
+    monkeypatch.setattr(main_logger, "MQTTWrapper", create_mqtt_wrapper)
 
     with ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(
             main_logger.run_ride,
-            cast(MQTTWrapper, mqtt_wrapper),
             tmp_path,
             stop_event,
             clock_ms=lambda: 10_000,
@@ -172,6 +185,7 @@ def test_run_ride_writes_complete_json_and_closes_mqtt(tmp_path: Path) -> None:
         output_path = future.result(timeout=5)
 
     written_data = json.loads(output_path.read_text(encoding="utf-8"))
+    assert mqtt_wrapper_creations == 1
     assert mqtt_wrapper.closed is True
     assert written_data["start_time"] == 10
     assert written_data["end_time"] == 10
@@ -179,7 +193,10 @@ def test_run_ride_writes_complete_json_and_closes_mqtt(tmp_path: Path) -> None:
     assert len(written_data["violations"]) == 1
 
 
-def test_run_ride_closes_mqtt_without_writing_after_error(tmp_path: Path) -> None:
+def test_run_ride_closes_mqtt_without_writing_after_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Prüft den Abbruch ohne Fahrtdatei nach einem Laufzeitfehler.
 
     :param tmp_path: Temporäres Ausgabeverzeichnis.
@@ -195,14 +212,59 @@ def test_run_ride_closes_mqtt_without_writing_after_error(tmp_path: Path) -> Non
             return 10_000
         raise RuntimeError("simulierter Uhrfehler")
 
+    monkeypatch.setattr(
+        main_logger,
+        "MQTTWrapper",
+        lambda: cast(MQTTWrapper, mqtt_wrapper),
+    )
+
     with pytest.raises(RuntimeError, match="simulierter Uhrfehler"):
         main_logger.run_ride(
-            cast(MQTTWrapper, mqtt_wrapper),
             tmp_path,
-            Event(),
+            threading.Event(),
             poll_interval_s=0.0,
             clock_ms=failing_clock,
         )
 
     assert mqtt_wrapper.closed is True
     assert list(tmp_path.iterdir()) == []
+
+
+def test_main_registers_shutdown_signals_and_uses_default_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prüft den Direktstart mit Standardspeicherort und Stoppsignalen."""
+    registered_handlers: dict[int, Callable[[int, FrameType | None], None]] = {}
+    received_output_directories: list[Path] = []
+    received_stop_events: list[threading.Event] = []
+
+    def register_signal(
+        signal_number: int,
+        handler: Callable[[int, FrameType | None], None],
+    ) -> signal.Handlers:
+        """Merkt sich einen Signal-Handler ohne Prozesszustand zu ändern."""
+        registered_handlers[signal_number] = handler
+        return signal.SIG_DFL
+
+    def run_ride_stub(
+        output_directory: Path,
+        stop_event: threading.Event,
+    ) -> Path:
+        """Erfasst die Argumente des Direktstarts ohne eine Fahrt zu starten."""
+        received_output_directories.append(output_directory)
+        received_stop_events.append(stop_event)
+        return output_directory / "ride.json"
+
+    monkeypatch.setattr(signal, "signal", register_signal)
+    monkeypatch.setattr(main_logger, "run_ride", run_ride_stub)
+
+    main_logger.main()
+
+    assert received_output_directories == [
+        Path(__file__).resolve().parents[2] / "data" / "rides"
+    ]
+    assert len(received_stop_events) == 1
+    assert set(registered_handlers) == {signal.SIGINT, signal.SIGTERM}
+
+    registered_handlers[signal.SIGTERM](signal.SIGTERM, None)
+    assert received_stop_events[0].is_set()

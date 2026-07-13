@@ -12,13 +12,15 @@ einzelne Alarme sicher vom MQTT-Hintergrundthread an die Fahrt-Schleife.
 Locks verhindern, dass beide Abläufe denselben veränderlichen Zustand zur
 gleichen Zeit lesen und schreiben.
 """
+import signal
+import threading
 import time
 from collections import deque
 from collections.abc import Callable, Mapping
 from datetime import datetime
 from pathlib import Path
 from queue import Empty, Queue
-from threading import Event, Lock
+from types import FrameType
 from typing import TypeAlias
 from zoneinfo import ZoneInfo
 
@@ -40,6 +42,7 @@ UNSAFE_OVERTAKE_THRESHOLD_CM = 150
 VISION_LOOKBACK_PERIOD_MS = 3_000
 GPS_EVENT_WINDOW_MS = 3_000
 RIDE_TIME_ZONE = ZoneInfo("Europe/Berlin")
+DEFAULT_RIDE_OUTPUT_DIRECTORY = Path(__file__).resolve().parents[2] / "data" / "rides"
 
 PayloadAction: TypeAlias = Callable[[PayloadInstance], None]
 
@@ -72,7 +75,7 @@ class SensorHistory:
         # MQTT fügt im Hintergrund neue Payloads hinzu, während die Fahrt-Schleife
         # möglicherweise gerade daraus liest. Der Lock erlaubt immer nur einem
         # dieser Abläufe gleichzeitig den Zugriff auf den Ringpuffer.
-        self._history_lock = Lock()
+        self._history_lock = threading.Lock()
         self._event_action = event_action
         self.mqtt_wrapper = mqtt_wrapper
 
@@ -290,7 +293,7 @@ class RideOrchestrator:
         # GPS-Payloads kommen im MQTT-Hintergrundthread an. `process_pending`
         # und `finish` laufen dagegen in der Fahrt-Schleife. Dieser Lock schützt
         # die gemeinsam verwendete RideSession und die Pending-Liste.
-        self._lock = Lock()
+        self._lock = threading.Lock()
         self._session = RideSession.start(start_timestamp_ms)
 
         # Pending bedeutet: Der ToF-Alarm ist bekannt, aber das symmetrische
@@ -535,9 +538,8 @@ def current_time_ms() -> int:
 
 
 def run_ride(
-    mqtt_wrapper: MQTTWrapper,
     output_directory: Path,
-    stop_event: Event,
+    stop_event: threading.Event,
     *,
     max_history_items: int = 1_000,
     poll_interval_s: float = 0.05,
@@ -545,10 +547,9 @@ def run_ride(
 ) -> Path:
     """Orchestriert eine vollständige Fahrt bis zur JSON-Ausgabe.
 
-    Die Funktion übernimmt die Ownership des MQTT-Wrappers und schließt ihn
-    bei normalem Ende sowie bei Fehlern.
+    Die Funktion erstellt ihren MQTT-Wrapper selbst und schließt ihn bei
+    normalem Ende sowie bei Fehlern.
 
-    :param mqtt_wrapper: Bereits verbundener MQTT-Wrapper.
     :param output_directory: Zielverzeichnis für abgeschlossene Fahrten.
     :param stop_event: Signal zum Beenden der laufenden Fahrt.
     :param max_history_items: Maximale Anzahl Payloads je Topic-History.
@@ -556,6 +557,7 @@ def run_ride(
     :param clock_ms: Injizierbare Uhr mit Unix-Zeit in Millisekunden.
     :return: Pfad der geschriebenen Fahrtdatei.
     """
+    mqtt_wrapper = MQTTWrapper()
     try:
         orchestrator = RideOrchestrator(
             start_timestamp_ms=clock_ms(),
@@ -577,3 +579,20 @@ def run_ride(
     # Fahrt vollständig und kann mit genau einem Dateizugriff gespeichert werden.
     ride_data = orchestrator.finish(clock_ms())
     return write_ride_data(ride_data, output_directory)
+
+
+def main() -> None:
+    """Startet die Fahrtaufzeichnung mit dem Standard-Ausgabeverzeichnis."""
+    stop_event = threading.Event()
+
+    def request_stop(_signal_number: int, _frame: FrameType | None) -> None:
+        """Fordert bei einem Prozesssignal ein geordnetes Fahrtende an."""
+        stop_event.set()
+
+    signal.signal(signal.SIGINT, request_stop)
+    signal.signal(signal.SIGTERM, request_stop)
+    run_ride(DEFAULT_RIDE_OUTPUT_DIRECTORY, stop_event)
+
+
+if __name__ == "__main__":
+    main()

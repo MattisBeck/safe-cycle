@@ -2,6 +2,9 @@
 
 set -Eeuo pipefail
 
+
+set -m
+
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 PYTHON="$PROJECT_ROOT/.venv/bin/python"
 PYTHONPATH_VALUE="$PROJECT_ROOT/src"
@@ -45,7 +48,7 @@ shutdown_processes() {
 
     echo
     echo "Beende Safe Cycle ..."
-    for index in "${!PROCESS_PIDS[@]}"; do
+    for ((index=${#PROCESS_PIDS[@]} - 1; index >= 0; index--)); do
         pid="${PROCESS_PIDS[$index]}"
         if kill -0 "$pid" 2>/dev/null; then
             echo "Stoppe ${PROCESS_NAMES[$index]} (PID $pid)"
@@ -68,7 +71,7 @@ shutdown_processes() {
         sleep 0.1
     done
 
-    for index in "${!PROCESS_PIDS[@]}"; do
+    for ((index=${#PROCESS_PIDS[@]} - 1; index >= 0; index--)); do
         pid="${PROCESS_PIDS[$index]}"
         if kill -0 "$pid" 2>/dev/null; then
             echo "Erzwinge Ende von ${PROCESS_NAMES[$index]} (PID $pid)" >&2
@@ -136,6 +139,7 @@ fi
 source "$PROJECT_ROOT/src/vision/start_npu.sh"
 
 echo "Starte Safe Cycle ..."
+start_process "Core" "core" false
 start_process "GPS" "sensors.gps_node" true
 start_process "Radar" "sensors.radar_node" true
 start_process "ToF links" "sensors.tof_node_left" true
