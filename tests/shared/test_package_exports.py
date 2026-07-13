@@ -5,12 +5,17 @@ from shared import (
     MQTT_BROKER_IP,
     MQTT_BROKER_PORT,
     TOPIC_PAYLOAD_TYPES,
+    Coordinates,
     GpsPayload,
     ImuPayload,
     MQTTWrapper,
+    PayloadInstance,
     PayloadType,
     RadarPayload,
+    RideData,
+    RoutePoint,
     TofPayload,
+    Violation,
     VisionPayload,
 )
 
@@ -24,9 +29,18 @@ def test_shared_exports_payload_models() -> None:
     assert VisionPayload.__name__ == "VisionPayload"
 
 
+def test_shared_exports_violation_models() -> None:
+    """Prüft direkte Imports der gemeinsamen Verstoßmodelle."""
+    assert Coordinates.__name__ == "Coordinates"
+    assert Violation.__name__ == "Violation"
+    assert RideData.__name__ == "RideData"
+    assert RoutePoint.__name__ == "RoutePoint"
+
+
 def test_shared_exports_mqtt_helpers() -> None:
     """Prüft direkte Imports der MQTT-Hilfstypen."""
     assert MQTTWrapper.__name__ == "MQTTWrapper"
+    assert PayloadInstance is not None
     assert PayloadType is not None
     assert TOPIC_PAYLOAD_TYPES["sensors/radar"] is RadarPayload
     assert TOPIC_PAYLOAD_TYPES["sensors/tof/left"] is TofPayload

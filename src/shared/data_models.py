@@ -1,6 +1,8 @@
 """Gemeinsame Datenmodelle für die Kommunikation zwischen Komponenten."""
 
 from dataclasses import dataclass
+from pathlib import Path
+from typing import TypeAlias
 
 
 @dataclass(frozen=True)
@@ -76,8 +78,8 @@ class VisionPayload:
     """Ergebnisse der YOLO-Fahrzeugerkennung im aktuellen Frame.
 
     :param timestamp_ms: Unix-Zeitstempel der Bildverarbeitung in Millisekunden.
-    :param found_vehicle: Gibt an, ob mindestens ein relevantes Fahrzeug erkannt wurde.
-    :param detected_types: Liste der erkannten Fahrzeugtypen (z. B. ['Car', 'Truck']).
+    :param found_vehicle: Gibt an, ob ein relevantes Fahrzeug erkannt wurde.
+    :param detected_types: Liste der erkannten Fahrzeugtypen.
     :param vehicle_count: Anzahl der relevanten Fahrzeugerkennungen im Bild.
     :param inference_time_ms: Reine Berechnungszeit des Modells für diesen Frame.
     """
@@ -87,3 +89,45 @@ class VisionPayload:
     detected_types: list[str]
     vehicle_count: int
     inference_time_ms: float
+
+
+@dataclass
+class Coordinates:
+    """Geografische Position eines aufgezeichneten Ereignisses."""
+
+    lat: float
+    lon: float
+
+
+@dataclass
+class Violation:
+    """Daten eines erkannten Abstandsverstoßes."""
+
+    timestamp: int
+    coordinates: Coordinates
+    distance_cm: float
+    speed_kmh: float
+    image_path: Path | None = None
+
+
+@dataclass
+class RoutePoint:
+    """Aufgezeichneter Punkt einer gefahrenen Route."""
+
+    timestamp: int
+    lat: float
+    lon: float
+
+
+@dataclass
+class RideData:
+    """Vollständige Daten einer abgeschlossenen Fahrt."""
+
+    ride_id: str
+    start_time: int
+    end_time: int
+    route_logs: list[RoutePoint]
+    violations: list[Violation]
+
+
+PayloadInstance: TypeAlias = GpsPayload | ImuPayload | RadarPayload | TofPayload | VisionPayload

@@ -84,7 +84,7 @@ class MQTTWrapper:
         Nachricht auf diesem Topic ausgeführt. Sie erhält bereits die passende
         Payload-Dataclass, nicht die rohen JSON-Bytes.
 
-        Beispiel:
+        Example:
             wrapper.subscribe("sensors/radar", handle_radar_payload)
 
         :param topic: MQTT-Topic, das abonniert werden soll.
