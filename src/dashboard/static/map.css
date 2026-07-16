@@ -9,7 +9,7 @@
 html, body {
     width: 100%;
     height: 100%;
-    /* Eine ansprechende dunkle Hintergrundfarbe, falls die Karte noch lädt */
+    /* dunkle Hintergrundfarbe, falls die Karte noch lädt */
     background-color: #121212; 
     font-family: 'Inter', sans-serif;
 }
