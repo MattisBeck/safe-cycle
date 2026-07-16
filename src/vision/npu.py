@@ -212,10 +212,12 @@ class NpuYoloV8Model:
         # QNNConfig verbindet AppBuilder mit der Qualcomm-Runtime und wählt HTP,
         # also den NPU/DSP-Pfad. Ohne diese Konfiguration würde AppBuilder nicht
         # wissen, welche nativen Bibliotheken geladen werden sollen.
+        # AppBuilder protokolliert jede Inferenzzeit als Warnung, daher zeigt der
+        # Dauerbetrieb nur echte Fehler an.
         self._appbuilder.qnn_config.Config(
             str(qnn_lib_dir),
             self._appbuilder.runtime.HTP,
-            self._appbuilder.log_level.WARN,
+            self._appbuilder.log_level.ERROR,
             self._appbuilder.profiling_level.BASIC,
         )
 
