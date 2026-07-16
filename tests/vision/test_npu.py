@@ -67,7 +67,7 @@ def create_fake_bindings(qnn_config: FakeQnnConfig, perf_profile: FakePerfProfil
         qnn_context=FakeQnnContext,
         qnn_config=qnn_config,
         runtime=SimpleNamespace(HTP="Htp"),
-        log_level=SimpleNamespace(WARN=2),
+        log_level=SimpleNamespace(ERROR=1),
         profiling_level=SimpleNamespace(BASIC=1),
         perf_profile=perf_profile,
     )
@@ -153,7 +153,7 @@ def test_npu_yolov8_model_configures_qnn_and_runs_prediction(
     model = npu_module.NpuYoloV8Model(model_path=model_path, appbuilder_bindings=bindings)
     prediction = model.predict(np.zeros((2, 2, 3), dtype=np.uint8))
 
-    assert qnn_config.calls == [(str(qnn_lib_dir), "Htp", 2, 1)]
+    assert qnn_config.calls == [(str(qnn_lib_dir), "Htp", 1, 1)]
     assert prediction.class_ids == [2]
     assert prediction.inference_time_ms >= 0.0
     assert perf_profile.calls == ["set:burst", "release"]
