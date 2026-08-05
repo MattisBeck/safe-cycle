@@ -155,6 +155,14 @@ def test_npu_yolov8_model_configures_qnn_and_runs_prediction(
 
     assert qnn_config.calls == [(str(qnn_lib_dir), "Htp", 1, 1)]
     assert prediction.class_ids == [2]
+    assert prediction.detections[0].class_id == 2
+    assert prediction.detections[0].confidence == pytest.approx(0.9)
+    assert (
+        prediction.detections[0].x_min,
+        prediction.detections[0].y_min,
+        prediction.detections[0].x_max,
+        prediction.detections[0].y_max,
+    ) == (0.0, 0.0, 10.0, 10.0)
     assert prediction.inference_time_ms >= 0.0
     assert perf_profile.calls == ["set:burst", "release"]
     assert FakeQnnContext.instances[0].model_name == "yolov8"

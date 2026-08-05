@@ -25,6 +25,11 @@ from typing import TypeAlias
 from zoneinfo import ZoneInfo
 
 from core.ride_writer import write_ride_data
+from core.vehicle_approach import (
+    APPROACH_LOOKBACK_PERIOD_MS,
+    VehicleApproachState,
+    classify_vehicle_approach,
+)
 from shared import (
     TOPIC_PAYLOAD_TYPES,
     Coordinates,
@@ -39,7 +44,7 @@ from shared import (
 )
 
 UNSAFE_OVERTAKE_THRESHOLD_CM = 150
-VISION_LOOKBACK_PERIOD_MS = 3_000
+VISION_LOOKBACK_PERIOD_MS = APPROACH_LOOKBACK_PERIOD_MS
 GPS_EVENT_WINDOW_MS = 3_000
 RIDE_TIME_ZONE = ZoneInfo("Europe/Berlin")
 DEFAULT_RIDE_OUTPUT_DIRECTORY = Path(__file__).resolve().parents[2] / "data" / "rides"
@@ -454,11 +459,11 @@ def subscribe_topics(
 
 
 def check_unsafe_overtake(tof_payload: TofPayload, vision_history: SensorHistory) -> bool:
-    """Prüft eine Abstandsunterschreitung auf ein erkanntes Fahrzeug.
+    """Prüft eine Abstandsunterschreitung auf ein sich näherndes Fahrzeug.
 
     :param tof_payload: ToF-Messung als zeitlicher Bezugspunkt.
     :param vision_history: Verlauf der Vision-Payloads.
-    :return: `True`, wenn Abstand und Fahrzeugerkennung zusammenpassen.
+    :return: `True`, wenn Abstand und Annäherungserkennung zusammenpassen.
     """
     if not tof_payload.is_valid or tof_payload.distance_cm >= UNSAFE_OVERTAKE_THRESHOLD_CM:
         return False
@@ -467,7 +472,12 @@ def check_unsafe_overtake(tof_payload: TofPayload, vision_history: SensorHistory
         VISION_LOOKBACK_PERIOD_MS,
         reference_timestamp_ms=tof_payload.timestamp_ms,
     )
-    return any(isinstance(event, VisionPayload) and event.found_vehicle for event in recent_events)
+    vision_events = [event for event in recent_events if isinstance(event, VisionPayload)]
+    approach_state = classify_vehicle_approach(
+        vision_events,
+        reference_timestamp_ms=tof_payload.timestamp_ms,
+    )
+    return approach_state is VehicleApproachState.APPROACHING
 
 
 def gather_violation_data(tof_payload: TofPayload, gps_payload: GpsPayload) -> Violation:

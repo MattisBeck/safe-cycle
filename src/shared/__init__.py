@@ -10,6 +10,7 @@ from shared.data_models import (
     RideData,
     RoutePoint,
     TofPayload,
+    VehicleDetection,
     Violation,
     VisionPayload,
 )
@@ -32,6 +33,7 @@ __all__ = [
     "TOPIC_SCHEMA",
     "TOPIC_PAYLOAD_TYPES",
     "TofPayload",
+    "VehicleDetection",
     "Violation",
     "VisionPayload",
 ]

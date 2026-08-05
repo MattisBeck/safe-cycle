@@ -9,7 +9,7 @@ import numpy as np
 import numpy.typing as npt
 import pytest
 
-from shared.data_models import VisionPayload
+from shared.data_models import VehicleDetection, VisionPayload
 from vision import npu as npu_module
 from vision import vision as vision_module
 
@@ -17,17 +17,27 @@ from vision import vision as vision_module
 class FakeModel:
     """Stellt ein NPU-Modell ohne echte Hardware nach."""
 
-    def __init__(self, class_ids: list[int], inference_time_ms: float) -> None:
+    def __init__(
+        self,
+        class_ids: list[int],
+        inference_time_ms: float,
+        detections: list[npu_module.ModelDetection] | None = None,
+    ) -> None:
         """Speichert das vorbereitete Ergebnis und spätere Aufrufdaten."""
         self.class_ids = class_ids
         self.inference_time_ms = inference_time_ms
+        self.detections = detections if detections is not None else []
         self.received_image: npt.NDArray[np.uint8] | None = None
         self.released = False
 
     def predict(self, image_source: npt.NDArray[np.uint8]) -> npu_module.ModelPrediction:
         """Speichert den Aufruf und gibt ein vorbereitetes Ergebnis zurück."""
         self.received_image = image_source
-        return npu_module.ModelPrediction(class_ids=self.class_ids, inference_time_ms=self.inference_time_ms)
+        return npu_module.ModelPrediction(
+            class_ids=self.class_ids,
+            inference_time_ms=self.inference_time_ms,
+            detections=self.detections,
+        )
 
     def release(self) -> None:
         """Merkt sich die Freigabe des simulierten Modells."""
@@ -95,6 +105,49 @@ def test_detect_vehicles_counts_only_relevant_vehicle_classes(monkeypatch: pytes
     assert payload.vehicle_count == 3
     assert payload.inference_time_ms == 12.5
     assert model.received_image is image_source
+
+
+def test_detect_vehicles_publishes_normalized_relevant_boxes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Prüft Boxkonvertierung und Filterung nicht relevanter Klassen."""
+    monkeypatch.setattr(time, "time", lambda: 1_717_618_000.123)
+    image_source = np.zeros((2, 2, 3), dtype=np.uint8)
+    model = FakeModel(
+        class_ids=[2, 0],
+        inference_time_ms=12.5,
+        detections=[
+            npu_module.ModelDetection(
+                class_id=2,
+                confidence=0.9,
+                x_min=0.0,
+                y_min=64.0,
+                x_max=320.0,
+                y_max=640.0,
+            ),
+            npu_module.ModelDetection(
+                class_id=0,
+                confidence=0.95,
+                x_min=0.0,
+                y_min=0.0,
+                x_max=640.0,
+                y_max=640.0,
+            ),
+        ],
+    )
+
+    payload = vision_module.detect_vehicles(image_source, model)
+
+    assert payload.detections == [
+        VehicleDetection(
+            class_name="Car",
+            confidence=0.9,
+            x_min=0.0,
+            y_min=0.1,
+            x_max=0.5,
+            y_max=1.0,
+        )
+    ]
+    assert payload.found_vehicle is True
+    assert payload.vehicle_count == 1
 
 
 def test_open_camera_capture_uses_gstreamer_backend(monkeypatch: pytest.MonkeyPatch) -> None:

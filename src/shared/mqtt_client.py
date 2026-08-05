@@ -13,6 +13,7 @@ import paho.mqtt.client as mqtt
 from paho.mqtt.enums import CallbackAPIVersion
 
 from shared.config import MQTT_BROKER_IP, MQTT_BROKER_PORT
+from shared.data_models import VehicleDetection, VisionPayload
 from shared.mqtt_topics import TOPIC_PAYLOAD_TYPES, PayloadType
 
 TOPIC_SCHEMA: dict[str, PayloadType] = TOPIC_PAYLOAD_TYPES
@@ -146,6 +147,14 @@ class MQTTWrapper:
 
         # Aus JSON wird wieder die vereinbarte Dataclass, danach läuft die Aktion.
         blueprint_dict = json.loads(raw_json)
+        if dataclass_schema is VisionPayload:
+            # Verschachtelte JSON-Objekte müssen explizit zurückgewandelt werden.
+            blueprint_dict["detections"] = [
+                detection
+                if isinstance(detection, VehicleDetection)
+                else VehicleDetection(**detection)
+                for detection in blueprint_dict.get("detections", [])
+            ]
         ready_dataclass = dataclass_schema(**blueprint_dict)
         action(ready_dataclass)
         return None

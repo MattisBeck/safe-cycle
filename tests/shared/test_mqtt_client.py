@@ -8,12 +8,13 @@ import paho.mqtt.client as mqtt
 import pytest
 from paho.mqtt.enums import CallbackAPIVersion
 
-from shared.data_models import GpsPayload, RadarPayload
+from shared.data_models import GpsPayload, RadarPayload, VehicleDetection, VisionPayload
 from shared.mqtt_client import MQTTWrapper
 
 RADAR_TOPIC = "sensors/radar"
 GPS_TOPIC = "sensors/gps"
-MessagePayload: TypeAlias = GpsPayload | RadarPayload
+VISION_TOPIC = "vision/vehicles"
+MessagePayload: TypeAlias = GpsPayload | RadarPayload | VisionPayload
 
 
 class FakeMqttClient:
@@ -300,3 +301,33 @@ def test_on_message_ignores_unregistered_topic(monkeypatch: pytest.MonkeyPatch) 
     wrapper._on_message(cast(mqtt.Client, client), None, message)
 
     assert client.subscribed_topics == []
+
+
+def test_on_message_deserializes_nested_vision_detections(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Prüft die Deserialisierung der verschachtelten Fahrzeugboxen."""
+    wrapper, client = create_wrapper_with_fake_client(monkeypatch)
+    detection = VehicleDetection(
+        class_name="Car",
+        confidence=0.9,
+        x_min=0.1,
+        y_min=0.2,
+        x_max=0.6,
+        y_max=0.8,
+    )
+    payload = VisionPayload(
+        timestamp_ms=1_717_618_000_000,
+        found_vehicle=True,
+        detected_types=["Car"],
+        vehicle_count=1,
+        inference_time_ms=12.5,
+        detections=[detection],
+    )
+    received_payloads: list[VisionPayload] = []
+
+    wrapper.subscribe(VISION_TOPIC, received_payloads.append)
+    message = make_message(VISION_TOPIC, payload)
+
+    wrapper._on_message(cast(mqtt.Client, client), None, message)
+
+    assert received_payloads == [payload]
+    assert isinstance(received_payloads[0].detections[0], VehicleDetection)

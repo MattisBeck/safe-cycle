@@ -1,6 +1,6 @@
 """Gemeinsame Datenmodelle für die Kommunikation zwischen Komponenten."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TypeAlias
 
@@ -74,6 +74,31 @@ class ImuPayload:
 
 
 @dataclass(frozen=True)
+class VehicleDetection:
+    """Ein erkanntes Fahrzeug mit normalisierter Bounding-Box.
+
+    :param class_name: Erkannte Fahrzeugklasse.
+    :param confidence: Konfidenz der Modellerkennung zwischen 0.0 und 1.0.
+    :param x_min: Linke Boxgrenze relativ zur Bildbreite.
+    :param y_min: Obere Boxgrenze relativ zur Bildhöhe.
+    :param x_max: Rechte Boxgrenze relativ zur Bildbreite.
+    :param y_max: Untere Boxgrenze relativ zur Bildhöhe.
+    """
+
+    class_name: str
+    confidence: float
+    x_min: float
+    y_min: float
+    x_max: float
+    y_max: float
+
+    @property
+    def area(self) -> float:
+        """Gibt die normalisierte Fläche der Box zurück."""
+        return max(0.0, self.x_max - self.x_min) * max(0.0, self.y_max - self.y_min)
+
+
+@dataclass(frozen=True)
 class VisionPayload:
     """Ergebnisse der YOLO-Fahrzeugerkennung im aktuellen Frame.
 
@@ -82,6 +107,7 @@ class VisionPayload:
     :param detected_types: Liste der erkannten Fahrzeugtypen.
     :param vehicle_count: Anzahl der relevanten Fahrzeugerkennungen im Bild.
     :param inference_time_ms: Reine Berechnungszeit des Modells für diesen Frame.
+    :param detections: Einzelne Fahrzeugerkennungen mit Bounding-Boxen.
     """
 
     timestamp_ms: int
@@ -89,6 +115,7 @@ class VisionPayload:
     detected_types: list[str]
     vehicle_count: int
     inference_time_ms: float
+    detections: list[VehicleDetection] = field(default_factory=list)
 
 
 @dataclass

@@ -18,6 +18,7 @@ from shared import (
     MQTTWrapper,
     PayloadInstance,
     TofPayload,
+    VehicleDetection,
     VisionPayload,
 )
 
@@ -68,7 +69,7 @@ def make_gps_payload(timestamp_ms: int) -> GpsPayload:
     )
 
 
-def make_vision_payload(timestamp_ms: int) -> VisionPayload:
+def make_vision_payload(timestamp_ms: int, *, area: float = 0.1) -> VisionPayload:
     """Erstellt eine positive Fahrzeugerkennung.
 
     :param timestamp_ms: Unix-Zeitstempel in Millisekunden.
@@ -79,7 +80,32 @@ def make_vision_payload(timestamp_ms: int) -> VisionPayload:
         detected_types=["Car"],
         vehicle_count=1,
         inference_time_ms=12.5,
+        detections=[
+            VehicleDetection(
+                class_name="Car",
+                confidence=0.9,
+                x_min=0.0,
+                y_min=0.0,
+                x_max=area,
+                y_max=1.0,
+            )
+        ],
     )
+
+
+def emit_approaching_vision(mqtt_wrapper: FakeMqttWrapper) -> None:
+    """Sendet einen wachsenden Boxverlauf an den Test-Wrapper."""
+    for timestamp_ms, area in [
+        (8_000, 0.10),
+        (8_500, 0.12),
+        (9_000, 0.16),
+        (9_500, 0.22),
+        (10_000, 0.30),
+    ]:
+        mqtt_wrapper.emit(
+            "vision/vehicles",
+            make_vision_payload(timestamp_ms=timestamp_ms, area=area),
+        )
 
 
 def make_tof_payload(timestamp_ms: int) -> TofPayload:
@@ -98,7 +124,7 @@ def test_orchestrator_processes_alert_after_gps_window() -> None:
         mqtt_wrapper=cast(MQTTWrapper, mqtt_wrapper),
         max_history_items=20,
     )
-    mqtt_wrapper.emit("vision/vehicles", make_vision_payload(timestamp_ms=9_000))
+    emit_approaching_vision(mqtt_wrapper)
     mqtt_wrapper.emit("sensors/tof/left", make_tof_payload(timestamp_ms=10_000))
     mqtt_wrapper.emit("sensors/gps", make_gps_payload(timestamp_ms=10_500))
 
@@ -121,7 +147,7 @@ def test_orchestrator_finish_flushes_immature_alert() -> None:
         mqtt_wrapper=cast(MQTTWrapper, mqtt_wrapper),
         max_history_items=20,
     )
-    mqtt_wrapper.emit("vision/vehicles", make_vision_payload(timestamp_ms=9_000))
+    emit_approaching_vision(mqtt_wrapper)
     mqtt_wrapper.emit("sensors/tof/right", make_tof_payload(timestamp_ms=10_000))
     mqtt_wrapper.emit("sensors/gps", make_gps_payload(timestamp_ms=10_500))
 
@@ -147,7 +173,7 @@ def test_orchestrator_tof_queue_does_not_block_at_history_limit() -> None:
     mqtt_wrapper.emit("sensors/tof/right", make_tof_payload(timestamp_ms=10_100))
     ride_data = orchestrator.finish(end_timestamp_ms=11_000)
 
-    assert len(ride_data.violations) == 2
+    assert ride_data.violations == []
 
 
 def test_run_ride_writes_complete_json_and_closes_mqtt(
@@ -178,7 +204,7 @@ def test_run_ride_writes_complete_json_and_closes_mqtt(
             clock_ms=lambda: 10_000,
         )
         assert mqtt_wrapper.all_topics_subscribed.wait(timeout=5)
-        mqtt_wrapper.emit("vision/vehicles", make_vision_payload(timestamp_ms=9_000))
+        emit_approaching_vision(mqtt_wrapper)
         mqtt_wrapper.emit("sensors/tof/left", make_tof_payload(timestamp_ms=10_000))
         mqtt_wrapper.emit("sensors/gps", make_gps_payload(timestamp_ms=10_500))
         stop_event.set()

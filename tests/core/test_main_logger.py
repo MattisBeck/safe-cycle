@@ -19,6 +19,7 @@ from shared import (
     RideData,
     RoutePoint,
     TofPayload,
+    VehicleDetection,
     Violation,
     VisionPayload,
 )
@@ -67,11 +68,17 @@ def make_radar_payload(timestamp_ms: int) -> RadarPayload:
     )
 
 
-def make_vision_payload(timestamp_ms: int, *, found_vehicle: bool) -> VisionPayload:
+def make_vision_payload(
+    timestamp_ms: int,
+    *,
+    found_vehicle: bool,
+    area: float = 0.1,
+) -> VisionPayload:
     """Erstellt eine Vision-Payload für die Überholprüfung.
 
     :param timestamp_ms: Unix-Zeitstempel der simulierten Erkennung.
     :param found_vehicle: Gibt an, ob ein Fahrzeug erkannt wurde.
+    :param area: Simulierte normalisierte Boxfläche.
     """
     return VisionPayload(
         timestamp_ms=timestamp_ms,
@@ -79,7 +86,33 @@ def make_vision_payload(timestamp_ms: int, *, found_vehicle: bool) -> VisionPayl
         detected_types=["Car"] if found_vehicle else [],
         vehicle_count=1 if found_vehicle else 0,
         inference_time_ms=12.5,
+        detections=[
+            VehicleDetection(
+                class_name="Car",
+                confidence=0.9,
+                x_min=0.0,
+                y_min=0.0,
+                x_max=area,
+                y_max=1.0,
+            )
+        ]
+        if found_vehicle
+        else [],
     )
+
+
+def append_approaching_vision(history: main_logger.SensorHistory) -> None:
+    """Fügt einen wachsenden Boxverlauf für einen Test hinzu."""
+    for timestamp_ms, area in [
+        (8_000, 0.10),
+        (8_500, 0.12),
+        (9_000, 0.16),
+        (9_500, 0.22),
+        (10_000, 0.30),
+    ]:
+        history._append_event(
+            make_vision_payload(timestamp_ms=timestamp_ms, found_vehicle=True, area=area)
+        )
 
 
 def make_tof_payload(
@@ -263,9 +296,9 @@ def test_get_events_uses_reference_timestamp_and_ignores_later_events() -> None:
 
 
 def test_check_unsafe_overtake_returns_true_for_recent_vehicle() -> None:
-    """Prüft eine Abstandsunterschreitung mit vorheriger Fahrzeugerkennung."""
+    """Prüft eine Abstandsunterschreitung mit erkannter Annäherung."""
     history = make_vision_history()
-    history._append_event(make_vision_payload(timestamp_ms=9_000, found_vehicle=True))
+    append_approaching_vision(history)
 
     result = main_logger.check_unsafe_overtake(make_tof_payload(timestamp_ms=10_000), history)
 
@@ -296,9 +329,9 @@ def test_check_unsafe_overtake_rejects_unmatched_vision_events(
 
 
 def test_check_unsafe_overtake_includes_lookback_boundary() -> None:
-    """Prüft eine Fahrzeugerkennung exakt auf der Zeitfenstergrenze."""
+    """Prüft eine Box exakt auf der Zeitfenstergrenze."""
     history = make_vision_history()
-    history._append_event(make_vision_payload(timestamp_ms=7_000, found_vehicle=True))
+    append_approaching_vision(history)
 
     result = main_logger.check_unsafe_overtake(make_tof_payload(timestamp_ms=10_000), history)
 
@@ -412,7 +445,7 @@ def test_process_tof_alert_returns_complete_violation() -> None:
     vision_history = make_vision_history()
     gps_history = make_gps_history()
     tof_payload = make_tof_payload(timestamp_ms=10_000, distance_cm=85.5)
-    vision_history._append_event(make_vision_payload(timestamp_ms=9_000, found_vehicle=True))
+    append_approaching_vision(vision_history)
     gps_history._append_event(make_gps_payload(timestamp_ms=10_500))
 
     result = main_logger.process_tof_alert(tof_payload, vision_history, gps_history)

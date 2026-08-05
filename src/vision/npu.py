@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, Sequence
 
@@ -37,11 +37,24 @@ class AppBuilderBindings:
 
 
 @dataclass(frozen=True)
+class ModelDetection:
+    """Eine vom Modell nach NMS verbliebene Erkennung."""
+
+    class_id: int
+    confidence: float
+    x_min: float
+    y_min: float
+    x_max: float
+    y_max: float
+
+
+@dataclass(frozen=True)
 class ModelPrediction:
     """Reduziertes Ergebnis der NPU-Erkennung für Safe Cycle."""
 
     class_ids: list[int]
     inference_time_ms: float
+    detections: list[ModelDetection] = field(default_factory=list)
 
 
 class VehicleDetector(Protocol):
@@ -101,17 +114,17 @@ def preprocess_frame_for_npu(image_source: FrameArray) -> ModelInputArray:
     return np.expand_dims(normalized_image, axis=0)
 
 
-def extract_class_ids_after_nms(
+def extract_detections_after_nms(
     model_output: Sequence[npt.NDArray[Any]],
     score_threshold: float = NMS_SCORE_THRESHOLD,
     iou_threshold: float = NMS_IOU_THRESHOLD,
-) -> list[int]:
-    """Extrahiert Klassen-IDs aus der QNN-Ausgabe und entfernt doppelte Boxen.
+) -> list[ModelDetection]:
+    """Extrahiert Erkennungen aus der QNN-Ausgabe und entfernt doppelte Boxen.
 
     :param model_output: Rohe QNN-Ausgabe in der Reihenfolge Scores, Klassen, Boxen.
     :param score_threshold: Mindestwahrscheinlichkeit für eine Erkennung.
     :param iou_threshold: Überschneidungsschwelle für Non-Maximum-Suppression.
-    :return: Klassen-IDs der verbleibenden Erkennungen.
+    :return: Verbleibende Erkennungen mit Boxen und Konfidenzen.
     """
     if len(model_output) < 3:
         raise RuntimeError("QNN-Modell hat weniger Ausgaben geliefert als erwartet.")
@@ -178,7 +191,33 @@ def extract_class_ids_after_nms(
         belongs_to_other_class = remaining_class_ids != filtered_class_ids[current_index]
         ordered_indices = remaining_indices[(iou <= iou_threshold) | belongs_to_other_class]
 
-    return [int(class_id) for class_id in filtered_class_ids[selected_indices].tolist()]
+    return [
+        ModelDetection(
+            class_id=int(filtered_class_ids[index]),
+            confidence=float(filtered_scores[index]),
+            x_min=float(filtered_boxes[index][0]),
+            y_min=float(filtered_boxes[index][1]),
+            x_max=float(filtered_boxes[index][2]),
+            y_max=float(filtered_boxes[index][3]),
+        )
+        for index in selected_indices
+    ]
+
+
+def extract_class_ids_after_nms(
+    model_output: Sequence[npt.NDArray[Any]],
+    score_threshold: float = NMS_SCORE_THRESHOLD,
+    iou_threshold: float = NMS_IOU_THRESHOLD,
+) -> list[int]:
+    """Gibt zur Kompatibilität nur die Klassen-IDs nach NMS zurück."""
+    return [
+        detection.class_id
+        for detection in extract_detections_after_nms(
+            model_output,
+            score_threshold=score_threshold,
+            iou_threshold=iou_threshold,
+        )
+    ]
 
 
 class NpuYoloV8Model:
@@ -250,8 +289,13 @@ class NpuYoloV8Model:
             self._appbuilder.perf_profile.RelPerfProfileGlobal()
 
         inference_time_ms = (time.perf_counter() - start_time) * 1000.0
-        class_ids = extract_class_ids_after_nms(model_output)
-        return ModelPrediction(class_ids=class_ids, inference_time_ms=inference_time_ms)
+        detections = extract_detections_after_nms(model_output)
+        class_ids = [detection.class_id for detection in detections]
+        return ModelPrediction(
+            class_ids=class_ids,
+            inference_time_ms=inference_time_ms,
+            detections=detections,
+        )
 
     def release(self) -> None:
         """Gibt den nativen AppBuilder-Kontext frei."""

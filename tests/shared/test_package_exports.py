@@ -15,6 +15,7 @@ from shared import (
     RideData,
     RoutePoint,
     TofPayload,
+    VehicleDetection,
     Violation,
     VisionPayload,
 )
@@ -26,6 +27,7 @@ def test_shared_exports_payload_models() -> None:
     assert ImuPayload.__name__ == "ImuPayload"
     assert RadarPayload.__name__ == "RadarPayload"
     assert TofPayload.__name__ == "TofPayload"
+    assert VehicleDetection.__name__ == "VehicleDetection"
     assert VisionPayload.__name__ == "VisionPayload"
 
 

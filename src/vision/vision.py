@@ -10,9 +10,9 @@ import numpy as np
 import numpy.typing as npt
 
 from shared.config import CAMERA_PIPELINE
-from shared.data_models import VisionPayload
+from shared.data_models import VehicleDetection, VisionPayload
 from shared.mqtt_client import MQTTWrapper
-from vision.npu import NpuYoloV8Model, VehicleDetector
+from vision.npu import IMAGE_SIZE, ModelDetection, NpuYoloV8Model, VehicleDetector
 
 BASE_DIR = Path(__file__).resolve().parent
 MODEL_PATH = BASE_DIR / "models" / "yolov8_det.bin"
@@ -54,7 +54,21 @@ def detect_vehicles(image_source: npt.NDArray[Any], model: VehicleDetector) -> V
     # Das Modell liefert COCO-Klassen-IDs. Safe Cycle braucht hier nur die
     # Fahrzeugklassen, weil Fußgänger oder Tiere einen normalerweise nicht überholen :).
     prediction = model.predict(image_source)
-    detected_types = [VEHICLE_CLASSES[class_id] for class_id in prediction.class_ids if class_id in VEHICLE_CLASSES]
+    vehicle_detections = [
+        create_vehicle_detection(detection)
+        for detection in prediction.detections
+        if detection.class_id in VEHICLE_CLASSES
+    ]
+    detected_types = [detection.class_name for detection in vehicle_detections]
+
+    # Ältere Testmodelle liefern nur Klassen-IDs. Die echte NPU-Pipeline liefert
+    # zusätzlich Boxen; ohne Boxen kann der Core keinen Annäherungstrend bestätigen.
+    if not prediction.detections:
+        detected_types = [
+            VEHICLE_CLASSES[class_id]
+            for class_id in prediction.class_ids
+            if class_id in VEHICLE_CLASSES
+        ]
 
     return VisionPayload(
         timestamp_ms=current_timestamp,
@@ -62,7 +76,29 @@ def detect_vehicles(image_source: npt.NDArray[Any], model: VehicleDetector) -> V
         detected_types=detected_types,
         vehicle_count=len(detected_types),
         inference_time_ms=prediction.inference_time_ms,
+        detections=vehicle_detections,
     )
+
+
+def create_vehicle_detection(model_detection: ModelDetection) -> VehicleDetection:
+    """Wandelt eine 640er Modellbox in normalisierte Koordinaten um.
+
+    :param model_detection: Erkennung aus der QNN-Ausgabe.
+    :return: MQTT-taugliche Fahrzeugerkennung.
+    """
+    return VehicleDetection(
+        class_name=VEHICLE_CLASSES[model_detection.class_id],
+        confidence=model_detection.confidence,
+        x_min=normalize_box_coordinate(model_detection.x_min),
+        y_min=normalize_box_coordinate(model_detection.y_min),
+        x_max=normalize_box_coordinate(model_detection.x_max),
+        y_max=normalize_box_coordinate(model_detection.y_max),
+    )
+
+
+def normalize_box_coordinate(coordinate: float) -> float:
+    """Begrenzt eine Modellkoordinate auf den Bereich 0 bis 1."""
+    return min(1.0, max(0.0, coordinate / IMAGE_SIZE))
 
 
 def run_live_vision(

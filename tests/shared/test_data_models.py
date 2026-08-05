@@ -14,6 +14,7 @@ from shared.data_models import (
     RideData,
     RoutePoint,
     TofPayload,
+    VehicleDetection,
     Violation,
     VisionPayload,
 )
@@ -115,17 +116,41 @@ def test_imu_payload_is_json_compatible() -> None:
 
 def test_vision_payload_is_json_compatible() -> None:
     """Prüft die Ergebnisse der Fahrzeugerkennung auf JSON-Kompatibilität."""
+    detection = VehicleDetection(
+        class_name="Car",
+        confidence=0.9,
+        x_min=0.1,
+        y_min=0.2,
+        x_max=0.6,
+        y_max=0.8,
+    )
     payload = VisionPayload(
         timestamp_ms=1_717_618_000_000,
         found_vehicle=True,
         detected_types=["Car", "Truck"],
         vehicle_count=2,
         inference_time_ms=12.5,
+        detections=[detection],
     )
 
     serialized = json.loads(json.dumps(asdict(payload)))
 
     assert serialized == asdict(payload)
+    assert serialized["detections"] == [asdict(detection)]
+
+
+def test_vehicle_detection_calculates_normalized_area() -> None:
+    """Prüft die Flächenberechnung einer Bounding-Box."""
+    detection = VehicleDetection(
+        class_name="Car",
+        confidence=0.9,
+        x_min=0.1,
+        y_min=0.2,
+        x_max=0.6,
+        y_max=0.8,
+    )
+
+    assert detection.area == pytest.approx(0.3)
 
 
 def test_violation_matches_agreed_data_structure() -> None:
