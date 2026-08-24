@@ -4,7 +4,9 @@ version = "0.1.0"
 description = "Erfassung und Auswertung kritischer Überholvorgänge bei Fahrrädern"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "folium>=0.20.0",
+]
 
 [dependency-groups]
 dev = [
