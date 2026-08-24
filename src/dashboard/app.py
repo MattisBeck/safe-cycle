@@ -41,7 +41,7 @@ def generate_map() -> str:
         if route_logs:
             route_coords = [[log["lat"], log["lon"]] for log in route_logs]
             all_coords.extend(route_coords)
-            folium.PolyLine(
+            folium.PolyLine(  # type: ignore[no-untyped-call]
                 route_coords,
                 color="#3b82f6",
                 weight=5,
@@ -78,11 +78,11 @@ def generate_map() -> str:
 
     # HeatMap hinzufügen, wenn es Verstöße gibt
     if heatmap_data:
-        HeatMap(heatmap_data).add_to(m)
+        HeatMap(heatmap_data).add_to(m)  # type: ignore[no-untyped-call]
 
     # Kartenausschnitt automatisch anpassen, wenn Daten vorhanden sind
     if all_coords:
-        m.fit_bounds(m.get_bounds())
+        m.fit_bounds(m.get_bounds())  # type: ignore[arg-type]
 
     # Legende als benutzerdefiniertes HTML-Element hinzufügen
     legend_html = """
@@ -134,7 +134,7 @@ def generate_map() -> str:
         </p>
     </div>
     """
-    m.get_root().html.add_child(folium.Element(legend_html))
+    m.get_root().html.add_child(folium.Element(legend_html))  # type: ignore[attr-defined]
 
     # Gib den generierten HTML-Code der Karte zurück
     return m.get_root().render()
